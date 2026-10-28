@@ -134,9 +134,11 @@ func (a *App) startTunCore() error {
 	port := a.MixedPort()
 	relDeadline := time.Now().Add(5 * time.Second)
 	for {
-		if !portFree(port) { // portFree=false 表示仍被占用
-			break // 已释放
+		// portFree==true 表示端口已空闲（无监听）→ 通过，继续授权启动。
+		if portFree(port) {
+			break
 		}
+		// 仍被占用：超时则报错，否则稍后重探。
 		if time.Now().After(relDeadline) {
 			return fmt.Errorf("混合代理端口 %d 迟迟未释放（可能有其他代理软件占用），已取消开启", port)
 		}

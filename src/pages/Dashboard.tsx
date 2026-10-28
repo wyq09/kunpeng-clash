@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, AUTO_GROUP, MAIN_GROUP, delayTestURL, latestDelay } from "../api";
 import type { CoreStatus, MihomoConnectionsPayload, MihomoProxy } from "../api";
 import { formatBytes, formatRate } from "../format";
-import { Sparkline, Switch, Segmented } from "../components/ui";
+import { Sparkline, Switch, Segmented, useTweened } from "../components/ui";
 import {
   IconCheckCircle,
   IconClock,
@@ -35,7 +35,8 @@ function nameAvatar(name: string): string {
 }
 
 function BigRate({ value }: { value: number }) {
-  const [num, unit] = formatBytes(value, 1).split(" ");
+  const tweened = useTweened(value);
+  const [num, unit] = formatBytes(Math.max(0, tweened), 1).split(" ");
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 10 }}>
       <span style={{ fontSize: 34, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{num}</span>
@@ -349,12 +350,16 @@ export default function Dashboard({
                   lineHeight: 1.25,
                 }}
               >
-                {status.running ? (pubIP || "检测中…") : "—"}
+                <span key={status.running ? pubIP || "pending" : "off"} className={`fade-swap${status.running && !pubIP ? " shimmer-text" : ""}`}>
+                  {status.running ? (pubIP || "检测中…") : "—"}
+                </span>
               </div>
-              <div className={`state-line ${stateLine.cls}`}>{stateLine.text}</div>
+              <div key={stateLine.text} className={`state-line fade-swap ${stateLine.cls}`}>
+                {stateLine.text}
+              </div>
             </div>
             <button
-              className="big-round-btn"
+              className={`big-round-btn${status.running ? " running" : ""}${coreBusy ? " busy" : ""}`}
               onClick={toggleCore}
               disabled={coreBusy}
               title={status.running ? "一键断开" : "一键连接"}

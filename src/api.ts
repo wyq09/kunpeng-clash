@@ -1,6 +1,7 @@
-import { AppService, CoreService, NodesService, ProfilesService, ProxyService, RulesService, events } from "./mygo";
-import type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule } from "./mygo";
+import { AgentService, AppService, CoreService, NodesService, ProfilesService, ProxyService, RulesService, events } from "./mygo";
+import type { AgentCall, AgentInfo, AgentTool, ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule } from "./mygo";
 import { mockEngine } from "./mock";
+import { mockAgent } from "./mockAgent";
 import type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
 
 /**
@@ -10,7 +11,7 @@ import type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
  *   事件节奏与数据形态与真实 mihomo 保持一致。
  */
 
-export type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule };
+export type { AgentCall, AgentInfo, AgentTool, ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule };
 export type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
 
 export const isMock = (globalThis as { mygo?: unknown }).mygo === undefined;
@@ -301,9 +302,40 @@ export const api = {
     }
     return AppService.openDataDir();
   },
+  /** 复制到剪贴板：应用内走系统 pbcopy，浏览器调试走 navigator.clipboard。 */
+  async copyText(text: string): Promise<void> {
+    if (isMock) return navigator.clipboard.writeText(text);
+    return AppService.copyText(text);
+  },
   getLogs(): Promise<LogEntry[]> {
     if (isMock) return Promise.resolve([]);
     return AppService.getLogs();
+  },
+
+  // ---- 智能体接入 ----
+  agentInfo(): Promise<AgentInfo> {
+    if (isMock) return mockAgent.info();
+    return AgentService.info();
+  },
+  agentSetEnabled(on: boolean): Promise<void> {
+    if (isMock) return mockAgent.setEnabled(on);
+    return AgentService.setEnabled(on);
+  },
+  agentResetToken(): Promise<AgentInfo> {
+    if (isMock) return mockAgent.resetToken();
+    return AgentService.resetToken();
+  },
+  agentExportSkill(): Promise<string> {
+    if (isMock) return Promise.reject(new Error("浏览器调试模式：导出仅在应用内可用"));
+    return AgentService.exportSkill();
+  },
+  agentClearActivity(): Promise<void> {
+    if (isMock) return mockAgent.clear();
+    return AgentService.clearActivity();
+  },
+  onAgent(fn: (c: AgentCall) => void): Unsubscribe {
+    if (isMock) return mockAgent.on(fn);
+    return events.agent.on(fn);
   },
 
   // ---- 事件 ----

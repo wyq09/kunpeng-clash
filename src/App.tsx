@@ -9,8 +9,10 @@ import Profiles from "./pages/Profiles";
 import Connections from "./pages/Connections";
 import Tools from "./pages/Tools";
 import ThemePage from "./pages/ThemePage";
+import Agent from "./pages/Agent";
 import logoUrl from "./assets/logo.png";
 import {
+  IconBot,
   IconConnections,
   IconDashboard,
   IconFile,
@@ -23,13 +25,14 @@ import { useToast } from "./components/Toast";
 // 主题在任何渲染前先落到 <html> 属性与 CSS 变量上（避免首帧闪默认色）
 initTheme();
 
-export type PageId = "dashboard" | "proxies" | "profiles" | "connections" | "tools";
+export type PageId = "dashboard" | "proxies" | "profiles" | "connections" | "agent" | "tools";
 
 const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: "dashboard", label: "仪表盘", icon: <IconDashboard /> },
   { id: "proxies", label: "代理", icon: <IconGlobe /> },
   { id: "profiles", label: "配置", icon: <IconFile /> },
   { id: "connections", label: "实时连接", icon: <IconConnections /> },
+  { id: "agent", label: "智能体", icon: <IconBot /> },
   { id: "tools", label: "工具", icon: <IconTool /> },
 ];
 
@@ -73,6 +76,11 @@ export default function App() {
     }
   });
   const lastMessageRef = useRef<string>("");
+  const contentRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [page, toolsSubpage]);
 
   const changeSmartMode = useCallback((on: boolean) => {
     setSmartMode(on);
@@ -129,6 +137,31 @@ export default function App() {
     return () => clearTimeout(t);
   }, [status?.running, smartMode, showToast]);
 
+  // 智能体改了配置：提示用户 + 让订阅/代理页重新拉数据；侧栏「智能体」亮起活动点
+  const [dataRev, setDataRev] = useState(0);
+  const [agentLiveAt, setAgentLiveAt] = useState(0);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const un = api.onAgent((c) => {
+      setAgentLiveAt(Date.now());
+      if (!c.mutates || !c.ok) return;
+      showToast(`智能体 · ${c.title}`, "success");
+      clearTimeout(t);
+      t = setTimeout(() => setDataRev((v) => v + 1), 400);
+    });
+    return () => {
+      clearTimeout(t);
+      un();
+    };
+  }, [showToast]);
+  const [, setLiveTick] = useState(0);
+  useEffect(() => {
+    if (!agentLiveAt) return;
+    const t = setTimeout(() => setLiveTick((x) => x + 1), 4000);
+    return () => clearTimeout(t);
+  }, [agentLiveAt]);
+  const agentLive = Date.now() - agentLiveAt < 4000;
+
   const goProxies = useCallback((group?: string) => {
     setInitialGroup(group);
     setPage("proxies");
@@ -153,12 +186,12 @@ export default function App() {
           gap: 12,
         }}
       >
-        <img src={logoUrl} alt="logo" width={56} height={56} style={{ borderRadius: 12 }} />
+        <img className={loadError ? undefined : "splash-logo"} src={logoUrl} alt="logo" width={56} height={56} style={{ borderRadius: 12 }} />
         <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text)" }}>鲲鹏 Clash</div>
         {loadError ? (
           <div style={{ color: "var(--red)" }}>初始化失败：{loadError}</div>
         ) : (
-          <div className="dim">正在连接内核…</div>
+          <div className="dim splash-text">正在连接内核…</div>
         )}
         {isMock && <div className="dim" style={{ fontSize: 12 }}>（浏览器调试模式，使用模拟数据）</div>}
       </div>
@@ -180,7 +213,8 @@ export default function App() {
             <IconSidebar />
           </button>
         </div>
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" style={{ "--nav-index": NAV.findIndex((n) => n.id === page) } as React.CSSProperties}>
+          <span className="nav-indicator" aria-hidden />
           {NAV.map((n) => (
             <button
               key={n.id}
@@ -190,28 +224,33 @@ export default function App() {
             >
               {n.icon}
               <span className="nav-label">{n.label}</span>
+              {n.id === "agent" && agentLive && <span className="nav-live" />}
             </button>
           ))}
         </nav>
         <div style={{ flex: 1 }} />
-        <div className={`dim${collapsed ? " nav-hidden" : ""}`} style={{ fontSize: 12, padding: "0 14px" }}>
+        <div className={`sidebar-status${collapsed ? " nav-hidden" : ""}`}>
+          <span className={`dot${status.running ? " ok" : ""}`} />
           {isMock ? "浏览器调试 · Mock" : status.running ? "运行中" : "已停止"}
         </div>
       </aside>
 
-      <main className="content">
-        {page === "dashboard" && (
-          <Dashboard status={status} goProxies={goProxies} smartMode={smartMode} onSmartModeChange={changeSmartMode} />
-        )}
-        {page === "proxies" && <Proxies status={status} initialGroup={initialGroup} />}
-        {page === "profiles" && <Profiles />}
-        {page === "connections" && <Connections status={status} />}
-        {page === "tools" &&
-          (toolsSubpage === "theme" ? (
-            <ThemePage onBack={() => setToolsSubpage(null)} />
-          ) : (
-            <Tools status={status} onOpenTheme={() => setToolsSubpage("theme")} />
-          ))}
+      <main className="content" ref={contentRef}>
+        <div key={`${page}-${toolsSubpage ?? ""}-${page === "profiles" || page === "proxies" ? dataRev : 0}`} className="page-anim">
+          {page === "dashboard" && (
+            <Dashboard status={status} goProxies={goProxies} smartMode={smartMode} onSmartModeChange={changeSmartMode} />
+          )}
+          {page === "proxies" && <Proxies status={status} initialGroup={initialGroup} />}
+          {page === "profiles" && <Profiles />}
+          {page === "connections" && <Connections status={status} />}
+          {page === "agent" && <Agent />}
+          {page === "tools" &&
+            (toolsSubpage === "theme" ? (
+              <ThemePage onBack={() => setToolsSubpage(null)} />
+            ) : (
+              <Tools status={status} onOpenTheme={() => setToolsSubpage("theme")} />
+            ))}
+        </div>
       </main>
     </div>
   );

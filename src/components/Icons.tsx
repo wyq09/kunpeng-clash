@@ -373,3 +373,59 @@ export const IconImport = (p: IconProps) => (
     <path d="M18 14v6M15 17h6" />
   </svg>
 );
+
+export const IconBot = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="8" width="16" height="12" rx="3.5" />
+    <path d="M12 8V4.5" />
+    <circle cx="12" cy="3.6" r="1" />
+    <path d="M9 13.5v1.5M15 13.5v1.5" />
+    <path d="M2 13v2M22 13v2" />
+  </svg>
+);
+
+export const IconKey = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="7.5" cy="15.5" r="4.5" />
+    <path d="m10.7 12.3 9.3-9.3" />
+    <path d="m16 7 3 3M14 9l2 2" />
+  </svg>
+);
+
+export const IconTerminal = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="m7 9 3 3-3 3M12.5 15H17" />
+  </svg>
+);
+
+export const IconEye = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="2.8" />
+  </svg>
+);
+
+export const IconEyeOff = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M10.6 5.6A9.6 9.6 0 0 1 12 5.5C18 5.5 21.5 12 21.5 12a16 16 0 0 1-2.7 3.5M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.4-1.1" />
+    <path d="M9.9 9.9a2.8 2.8 0 0 0 4.2 4.2" />
+    <path d="m3 3 18 18" />
+  </svg>
+);
+
+export const IconPlug = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9 3v5M15 3v5" />
+    <path d="M6 8h12v3a6 6 0 0 1-12 0z" />
+    <path d="M12 17v4" />
+  </svg>
+);
+
+export const IconBook = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" />
+    <path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H19" />
+    <path d="M8.5 7.5h7M8.5 11h5" />
+  </svg>
+);

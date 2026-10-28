@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IconClose } from "./Icons";
 
 /** 基础 UI 原子组件：开关 / 迷你折线图 / 分段控件 / 模态 / 延迟徽章。 */
@@ -44,30 +44,72 @@ export function Sparkline({
   stroke?: string;
   fill?: string;
 }) {
-  const { line, area } = useMemo(() => {
+  const { line, area, tip } = useMemo(() => {
     const pts = values.length >= 2 ? values.slice(-60) : [0, 0];
-    const max = Math.max(...pts, 1);
-    const pad = 2;
+    const max = Math.max(...pts, 1) * 1.08;
+    const pad = 3;
     const stepX = (width - pad * 2) / (pts.length - 1);
-    const y = (v: number) => height - pad - (v / max) * (height - pad * 2);
-    let linePath = "";
-    let areaPath = "";
-    pts.forEach((v, i) => {
-      const x = pad + i * stepX;
-      linePath += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y(v).toFixed(1)}`;
-    });
-    areaPath =
-      linePath + `L${(pad + (pts.length - 1) * stepX).toFixed(1)},${height - pad}L${pad},${height - pad}Z`;
-    return { line: linePath, area: areaPath };
+    const xy = pts.map((v, i) => [pad + i * stepX, height - pad - (v / max) * (height - pad * 2)] as const);
+    // Catmull-Rom → 三次贝塞尔：曲线平滑但不越过相邻点的上下界（不出现负值假波峰）
+    let linePath = `M${xy[0][0].toFixed(1)},${xy[0][1].toFixed(1)}`;
+    for (let i = 0; i < xy.length - 1; i++) {
+      const p0 = xy[Math.max(0, i - 1)];
+      const p1 = xy[i];
+      const p2 = xy[i + 1];
+      const p3 = xy[Math.min(xy.length - 1, i + 2)];
+      const lo = Math.min(p1[1], p2[1]);
+      const hi = Math.max(p1[1], p2[1]);
+      const c1y = Math.min(hi, Math.max(lo, p1[1] + (p2[1] - p0[1]) / 6));
+      const c2y = Math.min(hi, Math.max(lo, p2[1] - (p3[1] - p1[1]) / 6));
+      linePath += `C${(p1[0] + stepX / 3).toFixed(1)},${c1y.toFixed(1)} ${(p2[0] - stepX / 3).toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    }
+    const lastPt = xy[xy.length - 1];
+    const areaPath = linePath + `L${lastPt[0].toFixed(1)},${height - pad}L${pad},${height - pad}Z`;
+    return { line: linePath, area: areaPath, tip: lastPt };
   }, [values, width, height]);
 
   // SVG 展示属性不支持 var()，颜色经 style 注入以跟随主题 accent
   return (
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      <path d={area} style={{ fill }} />
-      <path d={line} style={{ stroke, fill: "none" }} strokeWidth={1.5} />
-    </svg>
+    <div className="sparkline">
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <path d={area} style={{ fill }} />
+        <path d={line} style={{ stroke, fill: "none" }} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <span
+        className="sparkline-tip"
+        style={{ left: `${(tip[0] / width) * 100}%`, top: `${(tip[1] / height) * 100}%`, background: stroke }}
+      />
+    </div>
   );
+}
+
+/* ---------------- 数字补间（大数字变化时平滑滚动，而不是跳变） ---------------- */
+
+export function useTweened(target: number, duration = 450): number {
+  const [value, setValue] = useState(target);
+  const fromRef = useRef(target);
+  const valueRef = useRef(target);
+  valueRef.current = value;
+  useEffect(() => {
+    if (!Number.isFinite(target)) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || Math.abs(target - valueRef.current) < 1e-6) {
+      setValue(target);
+      return;
+    }
+    fromRef.current = valueRef.current;
+    const start = performance.now();
+    let raf = 0;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - start) / duration);
+      const e = 1 - Math.pow(1 - k, 3);
+      setValue(fromRef.current + (target - fromRef.current) * e);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return value;
 }
 
 /* ---------------- 分段控件 ---------------- */
@@ -81,12 +123,31 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  // 选中滑块：测量当前按钮位置，用一块绝对定位的底色平滑滑过去
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  const measure = useCallback(() => {
+    const wrap = wrapRef.current;
+    const btn = wrap?.querySelector<HTMLButtonElement>(`button[data-value="${CSS.escape(value)}"]`);
+    if (wrap && btn) setThumb({ x: btn.offsetLeft, w: btn.offsetWidth });
+  }, [value]);
+  useLayoutEffect(measure, [measure, options.length]);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [measure]);
+
   return (
-    <div className="segmented">
+    <div className="segmented" ref={wrapRef}>
+      {thumb && <span className="seg-thumb" style={{ transform: `translateX(${thumb.x}px)`, width: thumb.w }} />}
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          data-value={o.value}
           className={value === o.value ? "active" : ""}
           onClick={() => onChange(o.value)}
         >
@@ -125,7 +186,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="modal-mask" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={wide ? { width: 720, maxWidth: "92vw" } : undefined}>
+      <div className="modal" role="dialog" aria-label={title} style={wide ? { width: 720, maxWidth: "92vw" } : undefined}>
         <div style={{ display: "flex", alignItems: "center" }}>
           <h3 style={{ flex: 1 }}>{title}</h3>
           <button className="icon-btn" onClick={onClose} style={{ background: "transparent", border: "none" }}>

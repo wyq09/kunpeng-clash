@@ -265,6 +265,10 @@ export const RulesService = {
 
 /** AppService 工具页杂项。 */
 export const AppService = {
+  /** CopyText 写入系统剪贴板（WKWebView 内 navigator.clipboard 不总可用）。 */
+  copyText(text: string): Promise<void> {
+    return call("AppService.CopyText", text);
+  },
   /** GetLogs 返回最近的内核日志（启动时回填用）。 */
   getLogs(): Promise<LogEntry[]> {
     return call("AppService.GetLogs");

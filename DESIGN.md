@@ -97,7 +97,8 @@ kunpeng-clash/
 - `profiles.yaml` 订阅元数据；`profiles/<id>.yaml` 订阅原文；`runtime.yaml` 最终生成的内核配置
 - `geoip.metadb` / `geosite.dat`（从 embed 释放）；`state.json` 内核状态/模式/端口/系统代理开关
   记忆 + `whitelist`（直连白名单）+ `customProxies`（自定义节点）+ `routeRules`（分流规则，
-  按订阅 ID 挂载，跟着配置走）+ `tun`（虚拟网卡开关）
+  按订阅 ID 挂载，跟着配置走）+ `tun`（虚拟网卡开关）+ `agentDisabled/agentToken/agentPort`（智能体网关）
+- `agent.json`：智能体网关端点（运行期存在，见 §5 AgentService）
 - `tun/`（TUN 开启时创建）：特权内核 HomeDir——geoip/geosite 硬链接、runtime.yaml 镜像、
   quit 退出标记、root 属主的 cache.db
 
@@ -198,6 +199,31 @@ kunpeng-clash/
 
 - `TestURL(url)`：通过 `http://127.0.0.1:{mixedPort}` 作为代理请求 url（5s 超时），返回 HTTP 状态码；失败返回 0 + 错误。
 - `OpenDataDir`：`open <dataDir>`。
+- `CopyText(text)`：经 `pbcopy` 写剪贴板（WKWebView 内 navigator.clipboard 不可靠）。
+
+### AgentService 语义（智能体接入网关，internal/agentapi + internal/app/agent*.go）
+
+目标：任何 AI 智能体（Claude Code / Cursor / Codex…）拿到一段指令即可接入并配置本应用。
+
+- **网关**：应用进程内 HTTP 服务，只监听 127.0.0.1，端口按 state.json `agentPort` →
+  9096 → 9099 → 9100…9108 依次尝试。默认开启（`agentDisabled=true` 关闭），令牌
+  `agentToken`（`kp_<hex>`）首启动生成、持久化。`MYGO_GENERATE` 环境下不启动（generate 期间不污染数据目录）。
+- **安全**：Host 必须是 localhost/127.0.0.1（防 DNS rebinding）；带 `Origin` 头一律拒绝（防网页 CSRF）；
+  除 `/`、`/v1/ping`、`/v1/guide`、`/v1/skill` 外都需令牌（`Authorization: Bearer` / `X-Kunpeng-Token` / `?token=`）。
+- **四种通道，共用同一份工具注册表（43 个工具，agent_tools.go）**：
+  - HTTP：`POST /v1/call/<tool>`（JSON 参数）、`GET /v1/tools`（含 JSON Schema）。
+  - MCP Streamable HTTP：`POST /mcp`（JSON-RPC 2.0；initialize/ping/tools/list/tools/call、批量、通知 202）。
+  - MCP stdio：`KunpengClash mcp [--data-dir X]`，桥接到运行中的网关（每条消息重读端点文件）。
+  - 命令行：`KunpengClash ctl [--data-dir X] <tool> key=value…|'{json}'|tools|guide|skill`；
+    退出码 0 成功 / 1 工具报错 / 2 应用未运行。
+- **端点发现**：`<dataDir>/agent.json`（0600，`baseUrl/mcpUrl/token/pid/version`），网关启动写入、停止删除；
+  stdio/CLI 靠它免配置找到网关。
+- **工具语义**：参数宽松解析（字符串数字/布尔、逗号或换行分隔的列表）；先报未知参数、再必填、再枚举。
+  `Mutates=true` 的工具执行后推 `agent` 事件 → 前端提示「智能体 · 标题」并刷新数据；
+  `Danger` 工具（删订阅/断开/TUN）在 MCP 中标 destructiveHint。教程 `/v1/guide` 由注册表自动生成，永不含令牌。
+- `Info()` 返回运行状态、地址、令牌、各通道配置片段、工具清单、最近 60 次调用；
+  `SetEnabled` / `ResetToken`（旧令牌立即失效）/ `Guide` / `ExportSkill`（写
+  `<dataDir>/agent-skill/kunpeng-clash/SKILL.md` 并在访达中显示）/ `ClearActivity`。
 
 ## 6. 内核配置生成（internal/configgen）
 
@@ -348,6 +374,9 @@ REST 桥接与事件流（traffic/log/memory/connections）在内核 Handoff 后
    `--config-only` 内核（端口 17892/controller 19099），验证启动、REST 鉴权、quit 文件优雅退出、
    端口释放；Go 层 `internal/corectl/standalone_test.go` 用动态端口覆盖同一链路。
 
+3d. **智能体网关（scripts/test_agent.mjs）**：独立数据目录 + `--port 7892 --no-sysproxy
+   --controller 127.0.0.1:19097` 起 headless，覆盖鉴权/Host/Origin 拦截、HTTP 全部工具、MCP HTTP、
+   MCP stdio、ctl 命令行、退出后 agent.json 清理、系统代理前后一致。
 4. **UI**：浏览器打开 vite dev server 人工/截图检查 + ego-browser 自动化（禁 Playwright）。
 
 ## 12. 风险与对策（已评估）

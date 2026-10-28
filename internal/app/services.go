@@ -564,6 +564,14 @@ func (a *App) Logs() []LogEntry {
 	return out
 }
 
+// CopyText 写入系统剪贴板（pbcopy）。
+func (a *App) CopyText(text string) error {
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	cmd.Env = append(os.Environ(), "LANG=en_US.UTF-8")
+	return cmd.Run()
+}
+
 // OpenDataDir 在 Finder 中打开应用数据目录。
 func (a *App) OpenDataDir() error {
 	return exec.Command("open", a.dataDir).Start()

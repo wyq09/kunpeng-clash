@@ -245,6 +245,9 @@ func (a AppService) OpenDataDir() error { return a.app.Impl.OpenDataDir() }
 // GetLogs 返回最近的内核日志（启动时回填用）。
 func (a AppService) GetLogs() ([]LogEntry, error) { return a.app.Impl.Logs(), nil }
 
+// CopyText 写入系统剪贴板（WKWebView 内 navigator.clipboard 不总可用）。
+func (a AppService) CopyText(text string) error { return a.app.Impl.CopyText(text) }
+
 // AgentService 智能体接入（本机 HTTP / MCP / 命令行网关，DESIGN §5b）。
 type AgentService struct{ app *App }
 

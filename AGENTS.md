@@ -50,6 +50,8 @@ npm run build             # 打包 .app + .dmg 到 build/
   主色蓝 #4078dc 系、大数字、圆角 16-20px、无花哨渐变）。五页：仪表盘/代理/配置/实时连接/工具。
 - 语言：简体中文。字体系统栈。图标用内联 SVG，不用 emoji 做图标（国旗 emoji 除外，节点名自带）。
 - 流量图表用轻量 SVG 自绘（sparkline），不引入图表库。
+- 避免不必要的次要标签和描述，让布局本身来传达信息
+  （Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.）。
 - 附加硬规则（用户全局约束）：不用紫蓝渐变铺底、不用霓虹发光、不做玻璃拟态、
   不堆彩色标签、不做弹跳动画。整体克制、深色、信息密度高。
 

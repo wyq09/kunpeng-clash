@@ -245,7 +245,9 @@ func (a *App) launchTunPrivileged() error {
 	a.mu.Unlock()
 	coreLog := filepath.Join(a.tunDir(), "core.log")
 	_ = os.Truncate(coreLog, 0) // 每次开启截断旧日志
-	shell := fmt.Sprintf("nohup %s --headless --config-only --config %s --data-dir %s --controller %s --secret %s --quit-file %s >>%s 2>&1 &",
+	// 注意：do shell script 无控制台，nohup 会报 "can't detach from console" —— 不能用 nohup；
+	// & 后台化 + 输出重定向到文件（非管道）即可，进程由 launchd 接管不会收 SIGHUP。
+	shell := fmt.Sprintf("%s --headless --config-only --config %s --data-dir %s --controller %s --secret %s --quit-file %s >>%s 2>&1 &",
 		shq(execPath), shq(a.tunRuntimePath()), shq(a.tunDir()), shq(a.ctlAddr), shq(secret), shq(a.quitFilePath()), shq(coreLog))
 	log.Printf("[kunpeng][tun] 请求管理员授权启动特权内核…")
 	_, err = osascriptAdmin(shell)

@@ -86,13 +86,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="v$(jq -r .version package.json)"
+          version="$(jq -r .version package.json)"
+          tag="v$version"
           git tag -f "$tag"
           git push -f origin "refs/tags/$tag"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          sed -e "s|{{VERSION}}|$version|g" -e "s|{{BASE}}|$base|g" .github/release-notes.md > notes.md
           files=$(find dist-release -type f)
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release upload "$tag" $files --clobber
+            gh release edit "$tag" --notes-file notes.md --prerelease=false --latest
           else
-            gh release create "$tag" $files --title "$tag" --generate-notes \
-              $([[ "$tag" == v0.* ]] && echo --prerelease)
+            gh release create "$tag" $files --title "鲲鹏 Clash $tag" --notes-file notes.md --latest
           fi

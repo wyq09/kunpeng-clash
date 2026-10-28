@@ -30,7 +30,8 @@ export default function Proxies({ status, initialGroup }: { status: CoreStatus; 
   const { showToast } = useToast();
   const [table, setTable] = useState<Record<string, MihomoProxy>>({});
   const [groups, setGroups] = useState<MihomoProxy[]>([]);
-  const [expanded, setExpanded] = useState<string>("");
+  /** 当前展开的组名；undefined=尚未自动选择过，""=用户主动收起（定时刷新不得再自动展开）。 */
+  const [expanded, setExpanded] = useState<string | undefined>(undefined);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [testingNodes, setTestingNodes] = useState<Set<string>>(new Set());
@@ -52,7 +53,11 @@ export default function Proxies({ status, initialGroup }: { status: CoreStatus; 
         setTable(all);
         setGroups(gs);
         setLoaded(true);
-        setExpanded((prev) => (prev && all[prev] ? prev : gs[0]?.name ?? ""));
+        setExpanded((prev) => {
+          if (prev === "") return ""; // 用户点了收起：保持收起，不抢着自动展开
+          if (prev && all[prev]) return prev;
+          return gs[0]?.name ?? "";
+        });
       } catch (e) {
         setLoaded(true);
         if (status.running) {
@@ -77,7 +82,7 @@ export default function Proxies({ status, initialGroup }: { status: CoreStatus; 
     }
   }, [initialGroup]);
 
-  const group = table[expanded];
+  const group = expanded ? table[expanded] : undefined;
   const nodeNames = useMemo(() => group?.all ?? [], [group]);
 
   const filteredNodes = useMemo(() => {
@@ -316,7 +321,7 @@ export default function Proxies({ status, initialGroup }: { status: CoreStatus; 
             </>
           ) : (
             <div className="dim" style={{ textAlign: "center", padding: "60px 0" }}>
-              {loaded ? "没有可展示的策略组" : "加载中…"}
+              {loaded ? (expanded === "" ? "已收起——点击右侧任意策略组查看节点" : "没有可展示的策略组") : "加载中…"}
             </div>
           )}
         </div>

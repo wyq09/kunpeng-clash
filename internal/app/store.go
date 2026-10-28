@@ -86,6 +86,8 @@ func New(opt Options) (*App, error) {
 		opt.ControllerAddr = corectlControllerAddr
 	}
 	a := &App{opt: opt, dataDir: opt.DataDir, ctlAddr: opt.ControllerAddr}
+	// 订阅拉取的经代理兜底地址：内核运行时直连失败可走内核出网（端口后续可变，拉取时读取实时值）
+	subscription.SetProxyFallback("")
 	if err := os.MkdirAll(filepath.Join(a.dataDir, "profiles"), 0o755); err != nil {
 		return nil, fmt.Errorf("创建数据目录失败: %w", err)
 	}

@@ -87,6 +87,7 @@ func (a *App) ProfileAdd(rawURL, name string) (Profile, error) {
 // ProfileUpdate 重新拉取订阅内容与流量信息；激活订阅且内核可用时热应用
 // （含 TUN 特权内核 REST 重载）；调度器与手动更新共用本方法。
 func (a *App) ProfileUpdate(id string) (Profile, error) {
+	subscription.SetProxyFallback(fmt.Sprintf("127.0.0.1:%d", a.MixedPort()))
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	a.mu.Lock()

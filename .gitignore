@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.mygo/
+*.log
+.v2c/
+.video_agent/
+/kunpeng
+.verify-shots/

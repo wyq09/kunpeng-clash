@@ -1,0 +1,98 @@
+# 检查 → 多平台打包 → 发布 Release。
+# - PR / 任意 push：类型检查 + go vet + go test，并打包各平台产物（Actions Artifacts）。
+# - push 到 main：额外发布 GitHub Release，tag = v{package.json 的 version}。
+#   版本号未变时覆盖该版本的产物并把 tag 移到最新提交；要发新版本，改 package.json 的 version 即可。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: go vet ./...
+      - run: go test ./...
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install NSIS (Windows installer)
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Build
+        run: npm run build -- -platform "${{ matrix.platform }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kunpengclash-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            build/*/*.dmg
+            build/*/*-setup-*.exe
+            build/*/*.deb
+            build/*/*.tar.gz
+
+  release:
+    name: Release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist-release
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(jq -r .version package.json)"
+          git tag -f "$tag"
+          git push -f origin "refs/tags/$tag"
+          files=$(find dist-release -type f)
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" $files --clobber
+          else
+            gh release create "$tag" $files --title "$tag" --generate-notes \
+              $([[ "$tag" == v0.* ]] && echo --prerelease)
+          fi

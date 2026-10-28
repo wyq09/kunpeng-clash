@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +65,7 @@ func (a *App) enableTun() error {
 	a.mu.Unlock()
 
 	rollback := func(reason string) error {
+		reason = reason + tailCoreLog(a.tunDir())
 		log.Printf("[kunpeng][tun] 开启失败，回滚: %s", reason)
 		a.mu.Lock()
 		a.tunActive = false
@@ -126,6 +128,20 @@ func (a *App) startTunCore() error {
 		return fmt.Errorf("写入 TUN 配置镜像失败: %w", err)
 	}
 	_ = os.Remove(a.quitFilePath()) // 清除残留退出标记
+	// 等 GUI 侧 mixed-port 真正释放（Handoff 的热应用关闭是准同步的，防御性等待）：
+	// 若 5s 后仍被占用，说明有第三方抢占（或 AutoConnect 竞态），提前失败避免
+	// 特权核起来后立刻被端口挤死。
+	port := a.MixedPort()
+	relDeadline := time.Now().Add(5 * time.Second)
+	for portFree(port) {
+		if !portFree(port) {
+			break
+		}
+		if time.Now().After(relDeadline) {
+			return fmt.Errorf("混合代理端口 %d 迟迟未释放（可能有其他代理软件占用），已取消开启", port)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err := a.launchTunPrivileged(); err != nil {
 		return fmt.Errorf("管理员授权未完成: %w", err)
 	}
@@ -225,8 +241,10 @@ func (a *App) launchTunPrivileged() error {
 	a.mu.Lock()
 	secret := a.state.Secret
 	a.mu.Unlock()
-	shell := fmt.Sprintf("nohup %s --headless --config-only --config %s --data-dir %s --controller %s --secret %s --quit-file %s >/dev/null 2>&1 &",
-		shq(execPath), shq(a.tunRuntimePath()), shq(a.tunDir()), shq(a.ctlAddr), shq(secret), shq(a.quitFilePath()))
+	coreLog := filepath.Join(a.tunDir(), "core.log")
+	_ = os.Truncate(coreLog, 0) // 每次开启截断旧日志
+	shell := fmt.Sprintf("nohup %s --headless --config-only --config %s --data-dir %s --controller %s --secret %s --quit-file %s >>%s 2>&1 &",
+		shq(execPath), shq(a.tunRuntimePath()), shq(a.tunDir()), shq(a.ctlAddr), shq(secret), shq(a.quitFilePath()), shq(coreLog))
 	log.Printf("[kunpeng][tun] 请求管理员授权启动特权内核…")
 	_, err = osascriptAdmin(shell)
 	return err
@@ -250,6 +268,32 @@ func (a *App) rollbackTun(reason string) {
 		log.Printf("[kunpeng][tun] 回滚重启内嵌内核失败: %v", serr)
 	}
 	a.pushStatusMessage(reason)
+}
+
+// portFree 探测 127.0.0.1:port 是否可连接（可连接=被占用）。
+func portFree(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err != nil {
+		return true // 连不上 = 空闲
+	}
+	_ = conn.Close()
+	return false
+}
+
+// tailCoreLog 读特权核日志尾部拼进错误信息（排障透出）。
+func tailCoreLog(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "core.log"))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > 3 {
+		lines = lines[len(lines)-3:]
+	}
+	if len(lines) == 0 || lines[0] == "" {
+		return ""
+	}
+	return "（内核日志: " + strings.Join(lines, " | ") + "）"
 }
 
 // osascriptAdmin 以管理员权限执行 shell 命令（弹出系统授权对话框）。

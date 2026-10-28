@@ -55,8 +55,23 @@ func RunStandalone(opt StandaloneOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := ctl.Start(cfgBytes); err != nil {
-		return err
+	// 启动重试：GUI 移交（Handoff）端口释放/AutoConnect 完成存在秒级竞态，
+	// 端口探测失败的启动立即重试（总计约 10s），期间响应 quit 标记。
+	var startErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		if opt.QuitFile != "" {
+			if _, serr := os.Stat(opt.QuitFile); serr == nil {
+				return nil
+			}
+		}
+		if startErr = ctl.Start(cfgBytes); startErr == nil {
+			break
+		}
+		log.Printf("[kunpeng][standalone] 启动尝试 %d/10 失败（%v），1s 后重试…", attempt+1, startErr)
+		time.Sleep(time.Second)
+	}
+	if startErr != nil {
+		return startErr
 	}
 	log.Printf("[kunpeng][standalone] 内核已启动（controller=%s quit-file=%s）",
 		opt.ControllerAddr, opt.QuitFile)

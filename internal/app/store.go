@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"kunpeng/internal/configgen"
@@ -338,11 +339,28 @@ func (a *App) firstRunImport() error {
 	a.mu.Lock()
 	existing := len(a.profiles)
 	a.mu.Unlock()
-	if existing > 0 || a.opt.PresetURL == "" {
+	if existing > 0 {
 		return nil
 	}
-	log.Printf("[kunpeng] 首次启动：导入预置订阅…")
-	p, err := a.ProfileAdd(a.opt.PresetURL, "")
+	// 预置订阅来源（开源仓库不含任何私人订阅地址）：
+	//   1) <数据目录>/preset.txt（每行一个订阅 URL，首行将被激活）——用户本地自留
+	//   2) opt.PresetURL（环境变量 KUNPENG_PRESET_SUB 注入，测试/自动化用）
+	url := a.opt.PresetURL
+	if url == "" {
+		if b, err := os.ReadFile(filepath.Join(a.dataDir, "preset.txt")); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					url = line
+					break
+				}
+			}
+		}
+	}
+	if url == "" {
+		return nil
+	}
+	log.Printf("[kunpeng] 首次启动：导入预置订阅（preset.txt / 环境变量）…")
+	p, err := a.ProfileAdd(url, "")
 	if err != nil {
 		return err
 	}

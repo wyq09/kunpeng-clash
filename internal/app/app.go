@@ -105,6 +105,7 @@ type Options struct {
 	EmitConnections func(ConnectionsSnapshot)
 	EmitMemory      func(MemoryInfo)
 	EmitStatus      func(CoreStatus)
+	EmitAgent       func(AgentCall) // 智能体每次调用工具后推送（UI 提示 + 刷新）
 }
 
 // App 持有全部服务共享的运行时。
@@ -125,6 +126,13 @@ type App struct {
 
 	logMu sync.Mutex
 	logs  []LogEntry // 环形缓冲，最多 500 条
+
+	agent agentRuntime // 智能体接入网关
+
+	liveMu      sync.Mutex // 最近一次事件采样（智能体查询状态用）
+	lastTraffic Traffic
+	lastMemory  MemoryInfo
+	lastConns   map[string]any
 }
 
 // DataDir 返回应用数据目录。

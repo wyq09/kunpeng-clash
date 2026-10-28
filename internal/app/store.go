@@ -22,6 +22,9 @@ import (
 // corectlControllerAddr external-controller 固定监听地址（DESIGN §6）。
 const corectlControllerAddr = "127.0.0.1:9097"
 
+// DefaultDataDir 默认数据目录（ctl / mcp 子命令定位 agent.json 用）。
+func DefaultDataDir() string { return defaultDataDir() }
+
 // defaultDataDir 默认数据目录。
 func defaultDataDir() string {
 	home, err := os.UserHomeDir()
@@ -43,6 +46,9 @@ type appState struct {
 	Whitelist       []string               `json:"whitelist,omitempty"`     // 直连白名单（域名/通配/IP 段）
 	CustomProxies   []map[string]any       `json:"customProxies,omitempty"` // 自定义节点（分享链接导入）
 	RouteRules      map[string][]RouteRule `json:"routeRules,omitempty"`    // 分流规则，按订阅 ID 挂载（跟着配置走）
+	AgentDisabled   bool                   `json:"agentDisabled,omitempty"` // 关闭智能体接入（默认开启）
+	AgentToken      string                 `json:"agentToken,omitempty"`    // 智能体网关令牌
+	AgentPort       int                    `json:"agentPort,omitempty"`     // 上次成功监听的网关端口
 	Message         string                 `json:"-"`                       // 最近一次错误/提示（会话内，不持久化）
 }
 
@@ -111,16 +117,25 @@ func New(opt Options) (*App, error) {
 		Secret:         a.state.Secret,
 		OnLog:          a.appendLog,
 		OnTraffic: func(up, down int64) {
+			a.liveMu.Lock()
+			a.lastTraffic = Traffic{Up: up, Down: down}
+			a.liveMu.Unlock()
 			if opt.EmitTraffic != nil {
 				opt.EmitTraffic(Traffic{Up: up, Down: down})
 			}
 		},
 		OnMemory: func(inuse, osLimit uint64) {
+			a.liveMu.Lock()
+			a.lastMemory = MemoryInfo{Inuse: inuse, OSLimit: osLimit}
+			a.liveMu.Unlock()
 			if opt.EmitMemory != nil {
 				opt.EmitMemory(MemoryInfo{Inuse: inuse, OSLimit: osLimit})
 			}
 		},
 		OnConnections: func(snapshot map[string]any) {
+			a.liveMu.Lock()
+			a.lastConns = snapshot
+			a.liveMu.Unlock()
 			if opt.EmitConnections != nil {
 				opt.EmitConnections(ConnectionsSnapshot{Data: snapshot})
 			}
@@ -174,6 +189,19 @@ func New(opt Options) (*App, error) {
 
 	// 订阅自动更新调度器（后台 goroutine，Shutdown 时干净退出）。
 	a.startUpdater()
+
+	// 智能体接入网关（默认开启；仅监听 127.0.0.1，令牌鉴权）。
+	a.mu.Lock()
+	terr := a.ensureAgentTokenLocked()
+	// mygo generate 会运行本程序导出绑定：此时不起网关，避免在真实数据目录留下 agent.json。
+	agentOn := !a.state.AgentDisabled && os.Getenv("MYGO_GENERATE") == ""
+	a.mu.Unlock()
+	if terr == nil {
+		_ = a.saveState()
+		if agentOn {
+			a.startAgent()
+		}
+	}
 	return a, nil
 }
 
@@ -209,6 +237,7 @@ func (a *App) Shutdown() {
 		a.state.Tun = false // 特权内核随应用退出，状态重置（重启应用后需手动再开）
 	}
 	a.mu.Unlock()
+	a.stopAgent()
 	u.closeAndWait()
 	if tun {
 		if err := a.stopTunCore(); err != nil {

@@ -4,6 +4,43 @@ import { call, event } from "mygo-runtime";
 
 // ---- Types ----
 
+export interface AgentCall {
+  tool: string;
+  title: string;
+  source: string;
+  ok: boolean;
+  error: string;
+  at: string;
+  durationMs: number;
+  mutates: boolean;
+}
+
+export interface AgentInfo {
+  enabled: boolean;
+  running: boolean;
+  baseUrl: string;
+  mcpUrl: string;
+  token: string;
+  cliPath: string;
+  prompt: string;
+  mcpConfig: string;
+  mcpHttpConfig: string;
+  cliExample: string;
+  httpExample: string;
+  tools: AgentTool[];
+  activity: AgentCall[];
+  error: string;
+}
+
+export interface AgentTool {
+  name: string;
+  title: string;
+  group: string;
+  description: string;
+  mutates: boolean;
+  danger: boolean;
+}
+
 export interface ConnectionsSnapshot {
   data: Record<string, unknown>;
 }
@@ -246,6 +283,34 @@ export const AppService = {
   },
 } as const;
 
+/** AgentService 智能体接入（本机 HTTP / MCP / 命令行网关，DESIGN §5b）。 */
+export const AgentService = {
+  /** ClearActivity 清空调用记录。 */
+  clearActivity(): Promise<void> {
+    return call("AgentService.ClearActivity");
+  },
+  /** ExportSkill 导出 SKILL.md 到数据目录并在 Finder 中定位，返回文件路径。 */
+  exportSkill(): Promise<string> {
+    return call("AgentService.ExportSkill");
+  },
+  /** Guide 返回完整智能体教程（Markdown）。 */
+  guide(): Promise<string> {
+    return call("AgentService.Guide");
+  },
+  /** Info 返回接入地址、令牌、接入指令、MCP 配置、能力清单与最近调用记录。 */
+  info(): Promise<AgentInfo> {
+    return call("AgentService.Info");
+  },
+  /** ResetToken 重新生成令牌（旧令牌立即失效），返回最新信息。 */
+  resetToken(): Promise<AgentInfo> {
+    return call("AgentService.ResetToken");
+  },
+  /** SetEnabled 开关智能体接入（关闭后网关停止监听，持久化）。 */
+  setEnabled(on: boolean): Promise<void> {
+    return call("AgentService.SetEnabled", on);
+  },
+} as const;
+
 // ---- Events ----
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
@@ -260,4 +325,6 @@ export const events = {
   memory: event<MemoryInfo>("memory"),
   /** StatusEvent 内核状态变化时推送。 */
   status: event<CoreStatus>("status"),
+  /** AgentEvent 智能体每调用一次工具推送一次（UI 实时提示并刷新数据）。 */
+  agent: event<AgentCall>("agent"),
 } as const;

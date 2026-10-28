@@ -19,6 +19,7 @@ import (
 
 	"github.com/egoist/mygo"
 
+	"kunpeng/internal/agentapi"
 	"kunpeng/internal/app"
 	"kunpeng/internal/corectl"
 
@@ -70,6 +71,12 @@ type (
 	MemoryInfo = app.MemoryInfo
 	// DelayResult 单节点延迟测试结果（毫秒，-1 表示失败）。
 	DelayResult = app.DelayResult
+	// AgentInfo 智能体接入页信息（地址、令牌、可直接复制的接入指令与 MCP 配置、能力清单、调用记录）。
+	AgentInfo = app.AgentInfo
+	// AgentTool 一项对智能体开放的能力。
+	AgentTool = app.AgentTool
+	// AgentCall 一次智能体调用记录。
+	AgentCall = app.AgentCall
 )
 
 // ---------------------------------------------------------------------------
@@ -87,6 +94,8 @@ var (
 	MemoryEvent = mygo.NewEvent[MemoryInfo]("memory")
 	// StatusEvent 内核状态变化时推送。
 	StatusEvent = mygo.NewEvent[CoreStatus]("status")
+	// AgentEvent 智能体每调用一次工具推送一次（UI 实时提示并刷新数据）。
+	AgentEvent = mygo.NewEvent[AgentCall]("agent")
 )
 
 // ---------------------------------------------------------------------------
@@ -236,6 +245,30 @@ func (a AppService) OpenDataDir() error { return a.app.Impl.OpenDataDir() }
 // GetLogs 返回最近的内核日志（启动时回填用）。
 func (a AppService) GetLogs() ([]LogEntry, error) { return a.app.Impl.Logs(), nil }
 
+// AgentService 智能体接入（本机 HTTP / MCP / 命令行网关，DESIGN §5b）。
+type AgentService struct{ app *App }
+
+// Info 返回接入地址、令牌、接入指令、MCP 配置、能力清单与最近调用记录。
+func (s AgentService) Info() (AgentInfo, error) { return s.app.Impl.AgentInfoNow(), nil }
+
+// SetEnabled 开关智能体接入（关闭后网关停止监听，持久化）。
+func (s AgentService) SetEnabled(on bool) error { return s.app.Impl.AgentSetEnabled(on) }
+
+// ResetToken 重新生成令牌（旧令牌立即失效），返回最新信息。
+func (s AgentService) ResetToken() (AgentInfo, error) { return s.app.Impl.AgentResetToken() }
+
+// Guide 返回完整智能体教程（Markdown）。
+func (s AgentService) Guide() (string, error) { return s.app.Impl.AgentGuideText(), nil }
+
+// ExportSkill 导出 SKILL.md 到数据目录并在 Finder 中定位，返回文件路径。
+func (s AgentService) ExportSkill() (string, error) { return s.app.Impl.AgentExportSkill() }
+
+// ClearActivity 清空调用记录。
+func (s AgentService) ClearActivity() error {
+	s.app.Impl.AgentClearActivity()
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // 应用入口
 // ---------------------------------------------------------------------------
@@ -244,7 +277,33 @@ func (a AppService) GetLogs() ([]LogEntry, error) { return a.app.Impl.Logs(), ni
 // 实现在 internal/app。
 type App struct{ Impl *app.App }
 
+// appVersion 由构建注入（-ldflags "-X main.appVersion=..."），缺省读 package.json 同步的值。
+var appVersion = "0.2.0"
+
+// runAgentClient 子命令：ctl（命令行）/ mcp（stdio MCP 桥）。与运行中的应用经本机网关通信。
+func runAgentClient(cmd string, args []string) int {
+	dataDir := app.DefaultDataDir()
+	if v := os.Getenv("KUNPENG_DATA_DIR"); v != "" {
+		dataDir = v
+	}
+	for len(args) >= 2 && (args[0] == "--data-dir" || args[0] == "-data-dir") {
+		dataDir, args = args[1], args[2:]
+	}
+	if cmd == "mcp" {
+		if err := agentapi.RunStdioMCP(dataDir, os.Stdin, os.Stdout); err != nil {
+			log.Printf("[kunpeng][mcp] %v", err)
+			return 1
+		}
+		return 0
+	}
+	return agentapi.RunCLI(dataDir, args, os.Stdout, os.Stderr)
+}
+
 func main() {
+	app.AppVersion = appVersion
+	if len(os.Args) > 1 && (os.Args[1] == "ctl" || os.Args[1] == "mcp") {
+		os.Exit(runAgentClient(os.Args[1], os.Args[2:]))
+	}
 	headless := flag.Bool("headless", false, "无窗口模式：直接启动服务层（导入/激活预置订阅并启动内核），供测试")
 	port := flag.Int("port", 0, "本次运行的混合代理端口（会话级覆盖，不持久化）")
 	noSysProxy := flag.Bool("no-sysproxy", false, "本次运行禁用系统代理写入（测试用）")
@@ -291,6 +350,7 @@ func main() {
 		EmitConnections: func(s ConnectionsSnapshot) { _ = ConnectionsEvent.Broadcast(s) },
 		EmitMemory:      func(m MemoryInfo) { _ = MemoryEvent.Broadcast(m) },
 		EmitStatus:      func(s CoreStatus) { _ = StatusEvent.Broadcast(s) },
+		EmitAgent:       func(c AgentCall) { _ = AgentEvent.Broadcast(c) },
 	})
 	if err != nil {
 		log.Fatalf("[kunpeng] 应用初始化失败: %v", err)
@@ -311,6 +371,7 @@ func main() {
 	mygo.Bind(NodesService{app: a})
 	mygo.Bind(RulesService{app: a})
 	mygo.Bind(AppService{app: a})
+	mygo.Bind(AgentService{app: a})
 
 	application.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -339,6 +400,9 @@ func runHeadless(impl *app.App) {
 	log.Printf("[kunpeng][headless] 数据目录: %s", impl.DataDir())
 	log.Printf("[kunpeng][headless] 混合代理端口: %d", impl.MixedPort())
 	log.Printf("[kunpeng][headless] external-controller: %s (secret=%s)", impl.ControllerAddr(), impl.Secret())
+	if info := impl.AgentInfoNow(); info.Running {
+		log.Printf("[kunpeng][headless] 智能体网关: %s（教程 %s/v1/guide）", info.BaseURL, info.BaseURL)
+	}
 
 	if err := impl.CoreStart(); err != nil {
 		log.Fatalf("[kunpeng][headless] 内核启动失败: %v", err)

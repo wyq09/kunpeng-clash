@@ -284,7 +284,7 @@ func (s AgentService) ClearActivity() error {
 type App struct{ Impl *app.App }
 
 // appVersion 由构建注入（-ldflags "-X main.appVersion=..."），缺省读 package.json 同步的值。
-var appVersion = "0.2.0"
+var appVersion = "0.3.0"
 
 // runAgentClient 子命令：ctl（命令行）/ mcp（stdio MCP 桥）。与运行中的应用经本机网关通信。
 func runAgentClient(cmd string, args []string) int {

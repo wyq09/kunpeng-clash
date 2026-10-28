@@ -33,16 +33,17 @@ func defaultDataDir() string {
 
 // appState state.json 的结构（内核状态/模式/端口/系统代理开关记忆）。
 type appState struct {
-	Mode            string           `json:"mode"`
-	MixedPort       int              `json:"mixedPort"`
-	SystemProxy     bool             `json:"systemProxy"`
-	AutoConnect     bool             `json:"autoConnect"`
-	ActiveProfileID string           `json:"activeProfileId"`
-	Secret          string           `json:"secret"`
-	Tun             bool             `json:"tun"`                     // 虚拟网卡（特权子进程模式）
-	Whitelist       []string         `json:"whitelist,omitempty"`     // 直连白名单（域名/通配/IP 段）
-	CustomProxies   []map[string]any `json:"customProxies,omitempty"` // 自定义节点（分享链接导入）
-	Message         string           `json:"-"`                       // 最近一次错误/提示（会话内，不持久化）
+	Mode            string                 `json:"mode"`
+	MixedPort       int                    `json:"mixedPort"`
+	SystemProxy     bool                   `json:"systemProxy"`
+	AutoConnect     bool                   `json:"autoConnect"`
+	ActiveProfileID string                 `json:"activeProfileId"`
+	Secret          string                 `json:"secret"`
+	Tun             bool                   `json:"tun"`                     // 虚拟网卡（特权子进程模式）
+	Whitelist       []string               `json:"whitelist,omitempty"`     // 直连白名单（域名/通配/IP 段）
+	CustomProxies   []map[string]any       `json:"customProxies,omitempty"` // 自定义节点（分享链接导入）
+	RouteRules      map[string][]RouteRule `json:"routeRules,omitempty"`    // 分流规则，按订阅 ID 挂载（跟着配置走）
+	Message         string                 `json:"-"`                       // 最近一次错误/提示（会话内，不持久化）
 }
 
 // profileRecord profiles.yaml 中的一条订阅元数据。

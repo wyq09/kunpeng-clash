@@ -96,7 +96,8 @@ kunpeng-clash/
 数据目录（运行时）：`~/Library/Application Support/KunpengClash/`
 - `profiles.yaml` 订阅元数据；`profiles/<id>.yaml` 订阅原文；`runtime.yaml` 最终生成的内核配置
 - `geoip.metadb` / `geosite.dat`（从 embed 释放）；`state.json` 内核状态/模式/端口/系统代理开关
-  记忆 + `whitelist`（直连白名单）+ `customProxies`（自定义节点）+ `tun`（虚拟网卡开关）
+  记忆 + `whitelist`（直连白名单）+ `customProxies`（自定义节点）+ `routeRules`（分流规则，
+  按订阅 ID 挂载，跟着配置走）+ `tun`（虚拟网卡开关）
 - `tun/`（TUN 开启时创建）：特权内核 HomeDir——geoip/geosite 硬链接、runtime.yaml 镜像、
   quit 退出标记、root 属主的 cache.db
 
@@ -151,6 +152,30 @@ kunpeng-clash/
   `a.example.com`（≥2 个点）→ DOMAIN 精确；`1.2.3.0/24` → IP-CIDR,…,no-resolve。
 - rule 模式下白名单规则插入在私有/环回网段 4 条之后、`DOMAIN-SUFFIX,cn` 之前；
   global/direct 模式不生效（全直连/全代理场景无意义）。
+
+### RulesService 语义（分流规则：域名 → 指定节点组，挂在订阅下）
+
+典型场景：某些站点（`*.chatgpt.com`、`*.claude.ai`、`*.gemini.com`…）只能用特定地区节点访问。
+规则以订阅 ID 为键存 state.json `routeRules`（**跟着配置走**：激活哪个订阅，哪份规则生效；
+删除订阅时连规则一起清除）。
+
+- `List(profileID)`：返回该订阅挂载的全部分流规则。
+- `Save(profileID, rules)`：全量替换。校验规范化（configgen.NormalizeRouteGroups）：
+  组数 ≤20、每组域名 ≤200 / 节点 ≤100、组名非空且不含逗号/斜杠（规则串按逗号切分）、
+  组名不重复、每组至少 1 域名 1 节点；域名规范化同白名单。→ 持久化 →
+  该订阅是激活订阅且内核可用时热应用 → StatusEvent。
+- `NodeNames(profileID)`：编辑器可选节点 = 该订阅真实节点（过滤机场信息占位节点）+ 自定义节点，
+  与生成配置时进入策略组的名单一致。
+- 每条规则 RouteRule：`{id, name, domains[], nodes[], auto}`。
+  生成时每组一个 mihomo 策略组：`auto=false` → select（代理页手动挑），`true` → url-test
+  （组内测速自动选最快，间隔/容差同 ♻️ 自动选择）。**组内只有所选节点**——不含 DIRECT、
+  不回落到任何其他组，保证这些域名只能在这一组节点里跑。
+- 生成容错（configgen.buildRouteGroups）：节点只保留真实存在于本次配置的
+  （订阅更新后改名/消失的条目自动失效）；整组节点失效则连组带规则跳过——绝不生成
+  「规则引用不存在的代理」让 mihomo 拒绝整份配置；组名与固定组/节点名/其他组冲突时自动加
+  `-2/-3` 后缀，域名规则跟随改名后的组名。
+- 规则插入位置：私有/环回网段 4 条直连之后、白名单与国内分流之前（对这些域名的定向是最高
+  优先级意图）；仅 rule 模式生效，与白名单语义一致。
 
 ### CoreService 语义
 
@@ -210,9 +235,11 @@ proxy-groups:
     interval: 300
     tolerance: 80
     proxies: <全部节点名>
+  - <分流组…（RulesService 配置：每组只含所选节点，select/url-test）>
 rules:
-  # （rule 模式）私有/环回网段 4 条直连在最前，白名单规则插在其后：
+  # （rule 模式）私有/环回网段 4 条直连在最前，其后依次：
   #   IP-CIDR,127.0.0.0/8 / 10.0.0.0/8 / 172.16.0.0/12 / 192.168.0.0/16 ,DIRECT,no-resolve
+  #   <分流规则…（域名 → 指定节点组，优先级最高，见 §5 RulesService）>
   #   <白名单规则…（configgen.WhitelistToRules，用户可配）>
   - DOMAIN-SUFFIX,cn,DIRECT
   - DOMAIN-KEYWORD,baidu,DIRECT
@@ -308,7 +335,8 @@ REST 桥接与事件流（traffic/log/memory/connections）在内核 Handoff 后
    `--controller 127.0.0.1:9098` + `--port 7891 --no-sysproxy`，预置本地订阅/白名单/自定义节点，
    校验 runtime.yaml 白名单规则顺序、测速 URL 为 http 版、API /proxies /rules 生效、
    系统代理前后一致；另配套 `go test ./internal/app -run TestSmokeV2` 集成测试
-   （白名单热应用/节点导入删除/订阅改名改 URL，动态端口不与 GUI 冲突）。
+   （白名单热应用/节点导入删除/订阅改名改 URL/分流规则挂订阅保存与热应用
+   TestSmokeV2RouteRules，动态端口不与 GUI 冲突）。
 3b. **TUN 手动测试步骤**（提权流程无法自动化，需要管理员密码）：
    1. `npm run build` 安装/启动 GUI，开启 TUN → 弹管理员密码框，输入后状态栏 Tun=true，
       `~/.zprofile` 外的任意站点经 utun 出站（`curl ifconfig.me` 核对出口）；

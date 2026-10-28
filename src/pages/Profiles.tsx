@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { Profile } from "../api";
 import { formatBytes, formatRelative } from "../format";
 import { ConfirmButton, Modal, Switch } from "../components/ui";
+import { RouteRulesModal } from "../components/RouteRulesModal";
 import {
   IconCheck,
   IconImport,
@@ -11,6 +12,7 @@ import {
   IconPlusCircle,
   IconQrCode,
   IconRefresh,
+  IconRule,
   IconShield,
   IconSort,
   IconTrash,
@@ -67,6 +69,9 @@ export default function Profiles() {
   const [editAutoUpdate, setEditAutoUpdate] = useState(false);
   const [editInterval, setEditInterval] = useState("1440");
   const [saving, setSaving] = useState(false);
+
+  // ---- 分流规则（挂在订阅下） ----
+  const [rulesProfile, setRulesProfile] = useState<Profile | null>(null);
 
   // ---- 自定义节点 ----
   const [nodes, setNodes] = useState<string[]>([]);
@@ -490,6 +495,16 @@ export default function Profiles() {
                   )}
                   <button
                     className="row-btn accent"
+                    title="分流规则：指定域名只走指定节点"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRulesProfile(p);
+                    }}
+                  >
+                    <IconRule size={15} />
+                  </button>
+                  <button
+                    className="row-btn accent"
                     title="编辑订阅"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -726,6 +741,8 @@ export default function Profiles() {
           }}
         />
       </Modal>
+
+      <RouteRulesModal profile={rulesProfile} onClose={() => setRulesProfile(null)} />
     </div>
   );
 }

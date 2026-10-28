@@ -51,6 +51,14 @@ export interface Profile {
   updateIntervalMin: number;
 }
 
+export interface RouteRule {
+  id: string;
+  name: string;
+  domains: string[];
+  nodes: string[];
+  auto: boolean;
+}
+
 export interface Traffic {
   up: number;
   down: number;
@@ -192,6 +200,29 @@ export const NodesService = {
   /** Remove 删除指定名称的自定义节点。 */
   remove(name: string): Promise<void> {
     return call("NodesService.Remove", name);
+  },
+} as const;
+
+/**
+ * RulesService 分流规则（域名 → 指定节点组）。规则挂在具体订阅（配置）下：
+ * 激活哪个订阅，哪份规则生效；这些域名只能在该组节点里跑（组内无 DIRECT、不回落）。
+ * 仅规则（rule）模式生效，与直连白名单语义一致。
+ */
+export const RulesService = {
+  /** List 返回某订阅挂载的全部分流规则。 */
+  list(profileID: string): Promise<RouteRule[]> {
+    return call("RulesService.List", profileID);
+  },
+  /** NodeNames 返回分流规则编辑器可选的节点名（该订阅真实节点 + 自定义节点）。 */
+  nodeNames(profileID: string): Promise<string[]> {
+    return call("RulesService.NodeNames", profileID);
+  },
+  /**
+   * Save 全量保存某订阅的分流规则并热应用（仅当该订阅为激活订阅时）。
+   * 每组：name 组名（不含逗号）、domains 域名/IP 段列表、nodes 允许的节点、auto 组内自动测速。
+   */
+  save(profileID: string, rules: RouteRule[]): Promise<void> {
+    return call("RulesService.Save", profileID, rules);
   },
 } as const;
 

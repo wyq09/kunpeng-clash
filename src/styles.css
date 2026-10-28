@@ -1161,6 +1161,95 @@ input:focus {
   border-color: var(--accent);
 }
 
+/* ---------------- 分流规则编辑器 ---------------- */
+
+.rule-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 54vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.rule-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card-inner);
+}
+
+.rule-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rule-card-head .segmented button {
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+
+.rule-label {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.rule-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+
+.rule-search input {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 96px;
+  font-size: 12.5px;
+}
+
+.rule-node-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.rule-node-chip {
+  max-width: 100%;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.rule-node-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.rule-node-chip.on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
 .qr-actions {
   display: flex;
   justify-content: flex-end;

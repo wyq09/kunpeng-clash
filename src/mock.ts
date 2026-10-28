@@ -1,4 +1,4 @@
-import type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile } from "./mygo";
+import type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule } from "./mygo";
 
 /**
  * 浏览器调试用 mock：模拟真实 mihomo IPC 的数据形态与节奏。
@@ -193,6 +193,18 @@ class MockEngine {
   proxies: Record<string, MihomoProxy> = {};
   whitelist: string[] = ["apple.com", "steamcommunity.com", "192.168.0.0/16"];
   customNodes: string[] = [];
+  // 分流规则（挂在订阅 ID 下）：默认给激活订阅一组示例，方便浏览器调试看到效果
+  routeRules: Record<string, RouteRule[]> = {
+    "mock-profile-2": [
+      {
+        id: "mock-rule-1",
+        name: "AI 专线",
+        domains: ["*.chatgpt.com", "*.claude.ai", "*.gemini.com"],
+        nodes: ["🇯🇵 日本-IEPL-GPT", "🇺🇸 美国-IEPL-GPT"],
+        auto: false,
+      },
+    ],
+  };
   private trafficListeners = new Set<Listener<{ up: number; down: number }>>();
   private connListeners = new Set<Listener<ConnectionsSnapshot>>();
   private memListeners = new Set<Listener<{ inuse: number; osLimit: number }>>();
@@ -563,6 +575,28 @@ class MockEngine {
     for (const g of Object.values(this.proxies)) {
       if (Array.isArray(g.all)) g.all = g.all.filter((n) => n !== name);
     }
+  }
+
+  // ---- 分流规则 ----
+
+  async listRouteRules(profileId: string): Promise<RouteRule[]> {
+    await delay(80);
+    return (this.routeRules[profileId] ?? []).map((r) => ({ ...r, domains: [...r.domains], nodes: [...r.nodes] }));
+  }
+
+  async saveRouteRules(profileId: string, rules: RouteRule[]) {
+    await delay(250);
+    if (rules.length === 0) {
+      delete this.routeRules[profileId];
+    } else {
+      this.routeRules[profileId] = rules;
+    }
+  }
+
+  async routeRuleNodes(profileId: string): Promise<string[]> {
+    await delay(80);
+    void profileId; // mock 里所有订阅节点相同
+    return [...NODE_NAMES, ...this.customNodes];
   }
 
   // ---- 直连白名单 ----

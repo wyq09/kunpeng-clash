@@ -104,11 +104,14 @@ export function Modal({
   title,
   onClose,
   children,
+  wide,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  /** 宽版（编辑器类弹窗，如分流规则） */
+  wide?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -122,7 +125,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="modal-mask" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" style={wide ? { width: 720, maxWidth: "92vw" } : undefined}>
         <div style={{ display: "flex", alignItems: "center" }}>
           <h3 style={{ flex: 1 }}>{title}</h3>
           <button className="icon-btn" onClick={onClose} style={{ background: "transparent", border: "none" }}>

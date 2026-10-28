@@ -19,6 +19,8 @@ import (
 	"kunpeng/internal/nodelink"
 	"kunpeng/internal/subscription"
 	"kunpeng/internal/sysproxy"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // 外部服务实现（main.go 契约）。
@@ -148,6 +150,8 @@ func (a *App) ProfileRemove(id string) error {
 	if wasActive {
 		a.state.ActiveProfileID = ""
 	}
+	// 订阅删除时一并清掉挂载在它下面的分流规则（跟着配置走，配置没了规则也没了）。
+	delete(a.state.RouteRules, id)
 	a.mu.Unlock()
 	_ = os.Remove(a.profileRawPath(id))
 	if wasActive {
@@ -569,7 +573,7 @@ func (a *App) OpenDataDir() error {
 // 内部工具
 // ---------------------------------------------------------------------------
 
-// buildRuntime 用激活订阅原文 + 自定义节点 + 白名单生成 runtime.yaml 字节流。
+// buildRuntime 用激活订阅原文 + 自定义节点 + 白名单 + 分流规则生成 runtime.yaml 字节流。
 func (a *App) buildRuntime(activeID string) ([]byte, error) {
 	raw, err := os.ReadFile(a.profileRawPath(activeID))
 	if err != nil {
@@ -583,9 +587,22 @@ func (a *App) buildRuntime(activeID string) ([]byte, error) {
 		Secret:             a.state.Secret,
 		Whitelist:          a.state.Whitelist,
 		CustomProxies:      a.state.CustomProxies,
+		RouteGroups:        toConfigGroups(a.state.RouteRules[activeID]),
 	}
 	a.mu.Unlock()
 	return configgen.Generate(raw, opt)
+}
+
+// toConfigGroups IPC 规则载荷 → 生成参数。
+func toConfigGroups(rules []RouteRule) []configgen.RouteGroup {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]configgen.RouteGroup, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, configgen.RouteGroup{Name: r.Name, Domains: r.Domains, Nodes: r.Nodes, Auto: r.Auto})
+	}
+	return out
 }
 
 // appendLog 写环形日志并回调。
@@ -860,4 +877,111 @@ func (a *App) CoreSetTun(on bool) error {
 		return a.enableTun()
 	}
 	return a.disableTun()
+}
+
+// ---------------------------------------------------------------------------
+// RulesService 分流规则（域名 → 指定节点组，挂在具体订阅下）
+// ---------------------------------------------------------------------------
+
+// RouteRulesList 返回某订阅挂载的全部分流规则。
+func (a *App) RouteRulesList(profileID string) ([]RouteRule, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.findLocked(profileID) == nil {
+		return nil, fmt.Errorf("订阅不存在: %s", profileID)
+	}
+	rules := a.state.RouteRules[profileID]
+	out := make([]RouteRule, len(rules))
+	copy(out, rules)
+	return out, nil
+}
+
+// RouteRulesSave 全量保存某订阅的分流规则：校验规范化 → 持久化（挂在 profileID 下）→
+// 该订阅是激活订阅且内核可用时热应用。规则只对激活订阅生效（跟着配置走）。
+func (a *App) RouteRulesSave(profileID string, rules []RouteRule) error {
+	groups, err := configgen.NormalizeRouteGroups(toConfigGroups(rules))
+	if err != nil {
+		return err
+	}
+	norm := make([]RouteRule, 0, len(groups))
+	for i, g := range groups {
+		// NormalizeRouteGroups 保序保数量：groups[i] 与 rules[i] 一一对应。
+		id := strings.TrimSpace(rules[i].ID)
+		if id == "" {
+			id = newID()
+		}
+		norm = append(norm, RouteRule{ID: id, Name: g.Name, Domains: g.Domains, Nodes: g.Nodes, Auto: g.Auto})
+	}
+
+	a.mu.Lock()
+	rec := a.findLocked(profileID)
+	if rec == nil {
+		a.mu.Unlock()
+		return fmt.Errorf("订阅不存在: %s", profileID)
+	}
+	wasActive := a.state.ActiveProfileID == profileID
+	if len(norm) == 0 {
+		delete(a.state.RouteRules, profileID)
+	} else {
+		if a.state.RouteRules == nil {
+			a.state.RouteRules = map[string][]RouteRule{}
+		}
+		a.state.RouteRules[profileID] = norm
+	}
+	a.mu.Unlock()
+
+	if err := a.saveState(); err != nil {
+		return fmt.Errorf("保存 state.json 失败: %w", err)
+	}
+	if wasActive {
+		if err := a.hotApply(); err != nil {
+			return fmt.Errorf("规则已保存，但热应用失败: %w", err)
+		}
+	}
+	a.pushStatus("")
+	return nil
+}
+
+// RouteRuleNodes 返回分流规则编辑器可选的节点名：该订阅的真实节点（过滤机场
+// 信息占位节点）+ 自定义节点，与生成配置时进入策略组的名单一致。
+func (a *App) RouteRuleNodes(profileID string) ([]string, error) {
+	a.mu.Lock()
+	rec := a.findLocked(profileID)
+	a.mu.Unlock()
+	if rec == nil {
+		return nil, fmt.Errorf("订阅不存在: %s", profileID)
+	}
+	raw, err := os.ReadFile(a.profileRawPath(profileID))
+	if err != nil {
+		return nil, fmt.Errorf("读取订阅原文失败: %w", err)
+	}
+	var sub struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(raw, &sub); err != nil {
+		return nil, fmt.Errorf("订阅 YAML 解析失败: %w", err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen := map[string]bool{}
+	out := make([]string, 0, len(sub.Proxies)+len(a.state.CustomProxies))
+	add := func(n string) {
+		if n == "" || seen[n] {
+			return
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	for _, p := range sub.Proxies {
+		n, _ := p["name"].(string)
+		if n != "" && configgen.IsInfoNode(n) {
+			continue
+		}
+		add(n)
+	}
+	for _, p := range a.state.CustomProxies {
+		n, _ := p["name"].(string)
+		add(n)
+	}
+	return out, nil
 }

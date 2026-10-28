@@ -422,3 +422,225 @@ func TestGenerateTunEnabled(t *testing.T) {
 		t.Fatal("默认 tun.enable 应为 false")
 	}
 }
+
+// TestNormalizeRouteGroups 分流规则校验：组名/域名/节点必填、上限、去重规范化。
+func TestNormalizeRouteGroups(t *testing.T) {
+	got, err := NormalizeRouteGroups([]RouteGroup{{
+		Name:    " AI 专线 ",
+		Domains: []string{"*.ChatGPT.com", "chatgpt.com", " claude.ai ", ""},
+		Nodes:   []string{"🇺🇸 US-01", "🇺🇸 US-01", ""},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "AI 专线" ||
+		len(got[0].Domains) != 3 || got[0].Domains[0] != "*.chatgpt.com" ||
+		len(got[0].Nodes) != 1 || got[0].Nodes[0] != "🇺🇸 US-01" {
+		t.Fatalf("NormalizeRouteGroups = %+v", got)
+	}
+
+	// 各种非法输入
+	for i, bad := range []RouteGroup{
+		{Name: "", Domains: []string{"a.com"}, Nodes: []string{"n"}},                  // 空组名
+		{Name: "a,b", Domains: []string{"a.com"}, Nodes: []string{"n"}},               // 组名含逗号
+		{Name: "x", Domains: nil, Nodes: []string{"n"}},                               // 无域名
+		{Name: "x", Domains: []string{"a.com"}, Nodes: nil},                           // 无节点
+		{Name: "x", Domains: []string{"a.com", "not a domain"}, Nodes: []string{"n"}}, // 非法域名
+		{Name: "x", Domains: []string{"a.com"}, Nodes: []string{"n"}, Auto: true},     // 合法（Auto 透传）
+	} {
+		_, err := NormalizeRouteGroups([]RouteGroup{bad})
+		shouldErr := i != 5
+		if shouldErr && err == nil {
+			t.Fatalf("用例 %d 应报错: %+v", i, bad)
+		}
+		if !shouldErr && err != nil {
+			t.Fatalf("用例 %d 不应报错: %v", i, err)
+		}
+	}
+
+	// 组名重复 / 超组数上限
+	if _, err := NormalizeRouteGroups([]RouteGroup{
+		{Name: "x", Domains: []string{"a.com"}, Nodes: []string{"n"}},
+		{Name: "x", Domains: []string{"b.com"}, Nodes: []string{"n"}},
+	}); err == nil {
+		t.Fatal("组名重复应报错")
+	}
+	many := make([]RouteGroup, MaxRouteGroups+1)
+	for i := range many {
+		many[i] = RouteGroup{Name: fmt.Sprintf("g%d", i), Domains: []string{"a.com"}, Nodes: []string{"n"}}
+	}
+	if _, err := NormalizeRouteGroups(many); err == nil {
+		t.Fatal("超过组数上限应报错")
+	}
+}
+
+// TestGenerateWithRouteGroups 分流规则生成：组内只含存在的节点、
+// 规则插在私有网段之后 / 白名单之前、能被 mihomo 接受；失效组整组跳过。
+func TestGenerateWithRouteGroups(t *testing.T) {
+	dir := t.TempDir()
+	releaseGeo(t, dir)
+	constant.SetHomeDir(dir)
+	raw, err := Generate([]byte(sampleSubscription), Options{
+		Mode:      "rule",
+		Secret:    "s",
+		Whitelist: []string{"*.cn.com"},
+		RouteGroups: []RouteGroup{
+			{
+				Name:    "AI 专线",
+				Domains: []string{"*.chatgpt.com", "claude.ai", "10.0.0.0/8"},
+				Nodes:   []string{"🇺🇸 不存在的节点", "🇯🇵 日本 [B]:02"},
+			},
+			{
+				Name:    "空组",
+				Domains: []string{"gone.example.com"},
+				Nodes:   []string{"🇺🇸 不存在的节点"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.ParseWithBytes(raw); err != nil {
+		t.Fatalf("含分流规则的配置被 mihomo 拒绝: %v\n%s", err, raw)
+	}
+	var cfg struct {
+		ProxyGroups []struct {
+			Name    string   `yaml:"name"`
+			Type    string   `yaml:"type"`
+			Proxies []string `yaml:"proxies"`
+		} `yaml:"proxy-groups"`
+		Rules []string `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	// 组：固定 2 个 + 1 个分流组（空组整组跳过）
+	if len(cfg.ProxyGroups) != 3 || cfg.ProxyGroups[2].Name != "AI 专线" || cfg.ProxyGroups[2].Type != "select" {
+		t.Fatalf("策略组不符: %+v", cfg.ProxyGroups)
+	}
+	if len(cfg.ProxyGroups[2].Proxies) != 1 || cfg.ProxyGroups[2].Proxies[0] != "🇯🇵 日本 [B]:02" {
+		t.Fatalf("分流组节点过滤失败: %v", cfg.ProxyGroups[2].Proxies)
+	}
+	// 规则顺序：私有网段 4 条 → 分流规则 → 白名单 → 国内分流
+	want := []string{
+		"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+		"DOMAIN-SUFFIX,chatgpt.com,AI 专线",
+		"DOMAIN-SUFFIX,claude.ai,AI 专线",
+		"IP-CIDR,10.0.0.0/8,AI 专线,no-resolve",
+		"DOMAIN-SUFFIX,cn.com,DIRECT",
+		"DOMAIN-SUFFIX,cn,DIRECT",
+	}
+	if len(cfg.Rules) < len(want) {
+		t.Fatalf("规则太少: %v", cfg.Rules)
+	}
+	for i, w := range want {
+		if cfg.Rules[i] != w {
+			t.Fatalf("规则[%d] = %q 期望 %q", i, cfg.Rules[i], w)
+		}
+	}
+}
+
+// TestGenerateRouteGroupsAutoType Auto=true 生成 url-test 组（自动选组内最快）。
+func TestGenerateRouteGroupsAutoType(t *testing.T) {
+	dir := t.TempDir()
+	releaseGeo(t, dir)
+	constant.SetHomeDir(dir)
+	raw, err := Generate([]byte(sampleSubscription), Options{
+		Mode:   "rule",
+		Secret: "s",
+		RouteGroups: []RouteGroup{{
+			Name:    "AI 专线",
+			Domains: []string{"*.chatgpt.com"},
+			Nodes:   []string{"🇭🇰 香港 IEPL 01"},
+			Auto:    true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.ParseWithBytes(raw); err != nil {
+		t.Fatalf("配置被 mihomo 拒绝: %v", err)
+	}
+	var cfg struct {
+		ProxyGroups []struct {
+			Name     string   `yaml:"name"`
+			Type     string   `yaml:"type"`
+			URL      string   `yaml:"url"`
+			Interval int      `yaml:"interval"`
+			Proxies  []string `yaml:"proxies"`
+		} `yaml:"proxy-groups"`
+	}
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, g := range cfg.ProxyGroups {
+		if g.Name == "AI 专线" {
+			found = true
+			if g.Type != "url-test" || g.URL != HealthURL || g.Interval != 300 || len(g.Proxies) != 1 {
+				t.Fatalf("Auto 组模板不符: %+v", g)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("缺少分流组")
+	}
+}
+
+// TestGenerateRouteGroupNameCollision 组名与固定组冲突时自动加后缀，规则跟随改名。
+func TestGenerateRouteGroupNameCollision(t *testing.T) {
+	dir := t.TempDir()
+	releaseGeo(t, dir)
+	constant.SetHomeDir(dir)
+	raw, err := Generate([]byte(sampleSubscription), Options{
+		Mode:   "rule",
+		Secret: "s",
+		RouteGroups: []RouteGroup{
+			{Name: GroupAuto, Domains: []string{"*.chatgpt.com"}, Nodes: []string{"🇭🇰 香港 IEPL 01"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.ParseWithBytes(raw); err != nil {
+		t.Fatalf("配置被 mihomo 拒绝: %v", err)
+	}
+	var cfg struct {
+		ProxyGroups []struct {
+			Name   string `yaml:"name"`
+			Origin string `yaml:"-"` // 占位
+		} `yaml:"proxy-groups"`
+		Rules []string `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, g := range cfg.ProxyGroups {
+		if strings.HasPrefix(g.Name, GroupAuto) {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("组名冲突未加后缀: %+v", cfg.ProxyGroups)
+	}
+	suffix := ""
+	for _, g := range cfg.ProxyGroups {
+		if g.Name != GroupAuto && strings.HasPrefix(g.Name, GroupAuto) {
+			suffix = g.Name
+		}
+	}
+	want := "DOMAIN-SUFFIX,chatgpt.com," + suffix
+	found := false
+	for _, r := range cfg.Rules {
+		if r == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("分流规则未跟随改名后的组名 %q: %v", suffix, cfg.Rules)
+	}
+}

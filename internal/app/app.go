@@ -31,6 +31,17 @@ type Profile struct {
 	UpdateIntervalMin int    `json:"updateIntervalMin"` // 自动更新间隔（分钟），默认 1440
 }
 
+// RouteRule 一条分流规则：Domains 里的域名/IP 段强制经由 Nodes 中选中的节点访问，
+// 只能在这组节点里跑（组内不含 DIRECT、不回落到其他组）。挂在具体订阅（配置）下，
+// 激活哪个订阅就生效哪份规则。
+type RouteRule struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`    // 规则组名（生成 mihomo 策略组名）
+	Domains []string `json:"domains"` // example.com / *.example.com / 1.2.3.0/24
+	Nodes   []string `json:"nodes"`   // 允许使用的节点（该订阅节点 + 自定义节点）
+	Auto    bool     `json:"auto"`    // true=组内自动测速选最快；false=手动选择
+}
+
 // CoreStatus 内核与系统的整体状态。
 type CoreStatus struct {
 	Running     bool   `json:"running"`

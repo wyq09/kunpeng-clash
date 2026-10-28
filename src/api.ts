@@ -1,5 +1,5 @@
-import { AppService, CoreService, NodesService, ProfilesService, ProxyService, events } from "./mygo";
-import type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile } from "./mygo";
+import { AppService, CoreService, NodesService, ProfilesService, ProxyService, RulesService, events } from "./mygo";
+import type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule } from "./mygo";
 import { mockEngine } from "./mock";
 import type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
 
@@ -10,7 +10,7 @@ import type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
  *   事件节奏与数据形态与真实 mihomo 保持一致。
  */
 
-export type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile };
+export type { ConnectionsSnapshot, CoreStatus, DelayResult, LogEntry, Profile, RouteRule };
 export type { MihomoConnectionsPayload, MihomoProxy } from "./mock";
 
 export const isMock = (globalThis as { mygo?: unknown }).mygo === undefined;
@@ -261,6 +261,23 @@ export const api = {
   removeNode(name: string): Promise<void> {
     if (isMock) return mockEngine.removeNode(name);
     return NodesService.remove(name);
+  },
+
+  // ---- 分流规则（挂在具体订阅下） ----
+  /** 某订阅的全部分流规则（域名组 → 指定节点组）。 */
+  listRouteRules(profileId: string): Promise<RouteRule[]> {
+    if (isMock) return mockEngine.listRouteRules(profileId);
+    return RulesService.list(profileId);
+  },
+  /** 全量保存某订阅的分流规则并热应用（仅规则模式生效）。 */
+  saveRouteRules(profileId: string, rules: RouteRule[]): Promise<void> {
+    if (isMock) return mockEngine.saveRouteRules(profileId, rules);
+    return RulesService.save(profileId, rules);
+  },
+  /** 分流规则编辑器可选的节点名（该订阅真实节点 + 自定义节点）。 */
+  routeRuleNodes(profileId: string): Promise<string[]> {
+    if (isMock) return mockEngine.routeRuleNodes(profileId);
+    return RulesService.nodeNames(profileId);
   },
 
   // ---- 杂项 ----

@@ -428,3 +428,120 @@ func TestSmokeV2HealthURLIsHTTP(t *testing.T) {
 		t.Fatal("runtime.yaml 出现 https 版测速 URL")
 	}
 }
+
+func TestSmokeV2RouteRules(t *testing.T) {
+	a, id := newSmokeApp(t)
+	if err := a.CoreStart(); err != nil {
+		t.Fatalf("内核启动失败: %v", err)
+	}
+
+	// 可选节点清单：订阅真实节点 + 自定义节点，过滤机场信息占位节点
+	nodes, err := a.RouteRuleNodes(id)
+	if err != nil {
+		t.Fatalf("RouteRuleNodes: %v", err)
+	}
+	if len(nodes) != 2 || !contains(nodes, "🇭🇰 香港 IEPL 01") || !contains(nodes, "🇯🇵 日本 02") {
+		t.Fatalf("RouteRuleNodes = %v", nodes)
+	}
+
+	// 非法输入全部报错且不落盘
+	for i, bad := range [][]RouteRule{
+		{{Name: "AI", Domains: nil, Nodes: []string{"🇯🇵 日本 02"}}},              // 无域名
+		{{Name: "AI", Domains: []string{"*.chatgpt.com"}, Nodes: nil}},         // 无节点
+		{{Name: "AI", Domains: []string{"not a domain"}, Nodes: []string{""}}}, // 非法域名
+		{{Name: "A,B", Domains: []string{"a.com"}, Nodes: []string{"n"}}},      // 组名含逗号
+	} {
+		if err := a.RouteRulesSave(id, bad); err == nil {
+			t.Fatalf("非法规则用例 %d 应报错", i)
+		}
+	}
+	if got, err := a.RouteRulesList(id); err != nil || len(got) != 0 {
+		t.Fatalf("失败保存不应落盘: %v %v", got, err)
+	}
+
+	// 正常保存：域名组 → 指定节点组（挂在订阅下）
+	rules := []RouteRule{{
+		Name:    "AI 专线",
+		Domains: []string{"*.chatgpt.com", " claude.ai ", "10.0.0.0/8"},
+		Nodes:   []string{"🇭🇰 香港 IEPL 01", "不存在的节点"},
+		Auto:    false,
+	}}
+	if err := a.RouteRulesSave(id, rules); err != nil {
+		t.Fatalf("RouteRulesSave: %v", err)
+	}
+	saved, err := a.RouteRulesList(id)
+	if err != nil || len(saved) != 1 {
+		t.Fatalf("RouteRulesList = %v err=%v", saved, err)
+	}
+	if saved[0].ID == "" || saved[0].Domains[0] != "*.chatgpt.com" ||
+		saved[0].Domains[1] != "claude.ai" || len(saved[0].Nodes) != 2 {
+		t.Fatalf("规范化结果不符: %+v", saved[0])
+	}
+
+	// runtime.yaml：分流规则在私有网段 4 条之后、国内直连之前；组只含存在的节点
+	rulesYAML := readRuntimeRules(t, a)
+	wantPrefix := []string{
+		"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+		"DOMAIN-SUFFIX,chatgpt.com,AI 专线",
+		"DOMAIN-SUFFIX,claude.ai,AI 专线",
+		"IP-CIDR,10.0.0.0/8,AI 专线,no-resolve",
+		"DOMAIN-SUFFIX,cn,DIRECT",
+	}
+	for i, w := range wantPrefix {
+		if rulesYAML[i] != w {
+			t.Fatalf("runtime 规则[%d] = %q 期望 %q", i, rulesYAML[i], w)
+		}
+	}
+	all, err := a.ProxiesAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxies, _ := all["proxies"].(map[string]any)
+	g, ok := proxies["AI 专线"].(map[string]any)
+	if !ok {
+		t.Fatalf("内核缺少分流组: %v", func() []string {
+			keys := make([]string, 0, len(proxies))
+			for k := range proxies {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
+	gp, _ := g["all"].([]any)
+	if len(gp) != 1 || gp[0] != "🇭🇰 香港 IEPL 01" {
+		t.Fatalf("分流组节点应只含存在的节点: %v", gp)
+	}
+	// 内核 /rules 生效
+	payloads := restRulePayloads(t, a)
+	if !contains(payloads, "chatgpt.com") || !contains(payloads, "claude.ai") {
+		t.Fatalf("内核 /rules 未生效分流规则: %v", payloads)
+	}
+	// state.json 持久化（挂在订阅 ID 下）
+	stateData, _ := os.ReadFile(a.statePath())
+	if !strings.Contains(string(stateData), `"routeRules"`) || !strings.Contains(string(stateData), id) {
+		t.Fatalf("state.json 未持久化 routeRules: %s", stateData)
+	}
+
+	// 挂到非激活订阅的规则不影响当前 runtime：清空激活订阅的规则
+	if err := a.RouteRulesSave(id, nil); err != nil {
+		t.Fatalf("清空规则: %v", err)
+	}
+	rulesYAML = readRuntimeRules(t, a)
+	if rulesYAML[4] != "DOMAIN-SUFFIX,cn,DIRECT" {
+		t.Fatalf("清空后分流规则应消失: %v", rulesYAML[:6])
+	}
+
+	// 删除订阅时连带着清除挂载的规则
+	if err := a.RouteRulesSave(id, rules); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ProfileRemove(id); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.RouteRulesList(id); err == nil {
+		t.Fatalf("订阅删除后规则应一并清除: %v", got)
+	}
+}

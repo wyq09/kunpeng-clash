@@ -56,6 +56,8 @@ func presetURL() string {
 type (
 	// Profile 一个订阅（远程配置）。
 	Profile = app.Profile
+	// RouteRule 一条分流规则：一组域名强制走一组指定节点（挂在具体订阅下）。
+	RouteRule = app.RouteRule
 	// CoreStatus 内核与系统的整体状态。
 	CoreStatus = app.CoreStatus
 	// Traffic 实时速率（字节/秒）。
@@ -131,6 +133,27 @@ func (n NodesService) List() ([]string, error) { return n.app.Impl.NodesList(), 
 
 // Remove 删除指定名称的自定义节点。
 func (n NodesService) Remove(name string) error { return n.app.Impl.NodesRemove(name) }
+
+// RulesService 分流规则（域名 → 指定节点组）。规则挂在具体订阅（配置）下：
+// 激活哪个订阅，哪份规则生效；这些域名只能在该组节点里跑（组内无 DIRECT、不回落）。
+// 仅规则（rule）模式生效，与直连白名单语义一致。
+type RulesService struct{ app *App }
+
+// List 返回某订阅挂载的全部分流规则。
+func (s RulesService) List(profileID string) ([]RouteRule, error) {
+	return s.app.Impl.RouteRulesList(profileID)
+}
+
+// Save 全量保存某订阅的分流规则并热应用（仅当该订阅为激活订阅时）。
+// 每组：name 组名（不含逗号）、domains 域名/IP 段列表、nodes 允许的节点、auto 组内自动测速。
+func (s RulesService) Save(profileID string, rules []RouteRule) error {
+	return s.app.Impl.RouteRulesSave(profileID, rules)
+}
+
+// NodeNames 返回分流规则编辑器可选的节点名（该订阅真实节点 + 自定义节点）。
+func (s RulesService) NodeNames(profileID string) ([]string, error) {
+	return s.app.Impl.RouteRuleNodes(profileID)
+}
 
 // CoreService 内核生命周期与系统设置。
 type CoreService struct{ app *App }
@@ -286,6 +309,7 @@ func main() {
 	mygo.Bind(CoreService{app: a})
 	mygo.Bind(ProxyService{app: a})
 	mygo.Bind(NodesService{app: a})
+	mygo.Bind(RulesService{app: a})
 	mygo.Bind(AppService{app: a})
 
 	application.WhenReady(func() {

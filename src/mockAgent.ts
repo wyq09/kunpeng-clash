@@ -3,7 +3,6 @@ import type { AgentCall, AgentInfo, AgentTool } from "./mygo";
 /** 浏览器调试用：智能体页的模拟数据（形态与 AgentService.Info 一致），每 6s 模拟一次智能体调用。 */
 
 const BIN = "/Applications/KunpengClash.app/Contents/MacOS/KunpengClash";
-const BASE = "http://127.0.0.1:9096";
 
 const TOOLS: AgentTool[] = [
   ["get_status", "查看整体状态", "状态与诊断", false, false],
@@ -62,7 +61,8 @@ function randomToken() {
   return "kp_" + Array.from({ length: 24 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
 }
 
-function build(token: string, enabled: boolean, activity: AgentCall[]): AgentInfo {
+function build(token: string, enabled: boolean, activity: AgentCall[], port: number): AgentInfo {
+  const BASE = `http://127.0.0.1:${port}`;
   const mcpConfig = JSON.stringify({ mcpServers: { "kunpeng-clash": { command: BIN, args: ["mcp"] } } }, null, 2);
   return {
     enabled,
@@ -95,6 +95,10 @@ ${mcpConfig}
     tools: TOOLS,
     activity,
     error: "",
+    port,
+    preferredPort: port,
+    portCustom: port !== 9096,
+    portWarning: "",
   };
 }
 
@@ -109,6 +113,7 @@ const SAMPLE: [string, string, string][] = [
 class MockAgent {
   token = randomToken();
   enabled = true;
+  port = 9096;
   activity: AgentCall[] = [];
   private listeners = new Set<(c: AgentCall) => void>();
   private i = 0;
@@ -134,12 +139,18 @@ class MockAgent {
     }, 6000);
   }
 
-  info = async () => build(this.token, this.enabled, this.activity);
+  info = async () => build(this.token, this.enabled, this.activity, this.port);
   setEnabled = async (on: boolean) => {
     this.enabled = on;
   };
   resetToken = async () => {
     this.token = randomToken();
+    return this.info();
+  };
+  setPort = async (port: number) => {
+    await new Promise((r) => setTimeout(r, 500));
+    if (port === 7890) throw new Error("端口 7890 是代理端口，换一个");
+    this.port = port;
     return this.info();
   };
   clear = async () => {

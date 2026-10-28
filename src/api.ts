@@ -325,6 +325,10 @@ export const api = {
     if (isMock) return mockAgent.resetToken();
     return AgentService.resetToken();
   },
+  agentSetPort(port: number): Promise<AgentInfo> {
+    if (isMock) return mockAgent.setPort(port);
+    return AgentService.setPort(port);
+  },
   agentExportSkill(): Promise<string> {
     if (isMock) return Promise.reject(new Error("浏览器调试模式：导出仅在应用内可用"));
     return AgentService.exportSkill();

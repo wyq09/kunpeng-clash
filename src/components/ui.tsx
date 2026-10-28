@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconClose } from "./Icons";
 
 /** 基础 UI 原子组件：开关 / 迷你折线图 / 分段控件 / 模态 / 延迟徽章。 */
@@ -184,7 +185,7 @@ export function Modal({
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="modal-mask" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={title} style={wide ? { width: 720, maxWidth: "92vw" } : undefined}>
         <div style={{ display: "flex", alignItems: "center" }}>
@@ -195,7 +196,8 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

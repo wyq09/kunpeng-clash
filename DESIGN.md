@@ -221,7 +221,11 @@ kunpeng-clash/
 - **工具语义**：参数宽松解析（字符串数字/布尔、逗号或换行分隔的列表）；先报未知参数、再必填、再枚举。
   `Mutates=true` 的工具执行后推 `agent` 事件 → 前端提示「智能体 · 标题」并刷新数据；
   `Danger` 工具（删订阅/断开/TUN）在 MCP 中标 destructiveHint。教程 `/v1/guide` 由注册表自动生成，永不含令牌。
-- `Info()` 返回运行状态、地址、令牌、各通道配置片段、工具清单、最近 60 次调用；
+- `SetPort(port)`：自定义端口（1024–65535，不得等于代理端口），持久化 `agentPort` + `agentPortFixed=true`。
+  运行中先在新端口起服务、成功后再关旧端口并重写 agent.json，失败则保持原端口并报错。
+  自定义端口在启动时被占用：临时改用候选端口并通过 `portWarning` 提示，不覆盖设定。
+  UI 改端口为两步（填端口 → 确认影响：HTTP 方式接入的智能体需重发指令，stdio/命令行自动跟随）。
+- `Info()` 返回运行状态、地址、端口（`port/preferredPort/portCustom/portWarning`）、令牌、各通道配置片段、工具清单、最近 60 次调用；
   `SetEnabled` / `ResetToken`（旧令牌立即失效）/ `Guide` / `ExportSkill`（写
   `<dataDir>/agent-skill/kunpeng-clash/SKILL.md` 并在访达中显示）/ `ClearActivity`。
 

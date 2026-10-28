@@ -260,6 +260,9 @@ func (s AgentService) SetEnabled(on bool) error { return s.app.Impl.AgentSetEnab
 // ResetToken 重新生成令牌（旧令牌立即失效），返回最新信息。
 func (s AgentService) ResetToken() (AgentInfo, error) { return s.app.Impl.AgentResetToken() }
 
+// SetPort 自定义网关端口（1024–65535，持久化）；新端口起不来时保持原端口并报错。
+func (s AgentService) SetPort(port int) (AgentInfo, error) { return s.app.Impl.AgentSetPort(port) }
+
 // Guide 返回完整智能体教程（Markdown）。
 func (s AgentService) Guide() (string, error) { return s.app.Impl.AgentGuideText(), nil }
 

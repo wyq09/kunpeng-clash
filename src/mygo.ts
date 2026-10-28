@@ -30,6 +30,10 @@ export interface AgentInfo {
   tools: AgentTool[];
   activity: AgentCall[];
   error: string;
+  port: number;
+  preferredPort: number;
+  portCustom: boolean;
+  portWarning: string;
 }
 
 export interface AgentTool {
@@ -312,6 +316,10 @@ export const AgentService = {
   /** SetEnabled 开关智能体接入（关闭后网关停止监听，持久化）。 */
   setEnabled(on: boolean): Promise<void> {
     return call("AgentService.SetEnabled", on);
+  },
+  /** SetPort 自定义网关端口（1024–65535，持久化）；新端口起不来时保持原端口并报错。 */
+  setPort(port: number): Promise<AgentInfo> {
+    return call("AgentService.SetPort", port);
   },
 } as const;
 

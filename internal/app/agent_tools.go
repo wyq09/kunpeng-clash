@@ -212,7 +212,7 @@ func (a *App) buildAgentTools() *agentapi.Registry {
 	})
 	r.Add(agentapi.Tool{
 		Name: "update_subscription", Title: "更新订阅", Group: grpSub, Mutates: true,
-		Desc: "重新拉取订阅的节点与流量信息；激活订阅更新后立即生效。subscription 填 all 更新全部。",
+		Desc:   "重新拉取订阅的节点与流量信息；激活订阅更新后立即生效。subscription 填 all 更新全部。",
 		Params: []agentapi.Param{pSub},
 		Handler: func(x agentapi.Args) (any, error) {
 			if strings.EqualFold(x.Str("subscription"), "all") {
@@ -576,8 +576,10 @@ func (a *App) buildAgentTools() *agentapi.Registry {
 	// ---------------- 直连白名单 ----------------
 	r.Add(agentapi.Tool{
 		Name: "get_direct_list", Title: "直连白名单", Group: grpDirect,
-		Desc:    "不走代理、直接连接的域名/IP 段（规则模式生效）。",
-		Handler: func(agentapi.Args) (any, error) { return map[string]any{"items": a.WhitelistGet(), "effective": a.modeNote()}, nil },
+		Desc: "不走代理、直接连接的域名/IP 段（规则模式生效）。",
+		Handler: func(agentapi.Args) (any, error) {
+			return map[string]any{"items": a.WhitelistGet(), "effective": a.modeNote()}, nil
+		},
 	})
 	r.Add(agentapi.Tool{
 		Name: "add_direct_domains", Title: "加入直连", Group: grpDirect, Mutates: true,

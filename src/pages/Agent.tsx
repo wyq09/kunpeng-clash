@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isMock } from "../api";
 import type { AgentCall, AgentInfo } from "../api";
-import { ConfirmButton, Segmented, Switch } from "../components/ui";
-import { IconBook, IconBot, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, IconRefresh } from "../components/Icons";
+import { ConfirmButton, Modal, Segmented, Switch } from "../components/ui";
+import { IconBook, IconBot, IconCheck, IconChevronDown, IconCopy, IconPencil, IconEye, IconEyeOff, IconRefresh } from "../components/Icons";
 import { useToast } from "../components/Toast";
 
 /** 智能体接入：一键复制接入指令（发给任意 AI 智能体即可自助接入）+ 各接入方式配置 + 令牌 + 能力清单 + 调用记录。 */
@@ -32,6 +32,7 @@ export default function Agent() {
   const [busy, setBusy] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [freshAt, setFreshAt] = useState(0);
+  const [portOpen, setPortOpen] = useState(false);
   const now = useNow(10_000);
 
   const load = useCallback(async () => {
@@ -230,9 +231,19 @@ export default function Agent() {
       </div>
 
       <div className="agent-grid">
-        {/* 令牌 */}
+        {/* 端口 + 令牌 */}
         <div className="card stagger">
           <div className="card-title-row">
+            <span>端口</span>
+          </div>
+          <div className="token-row">
+            <span className="mono token-text">{info.port}</span>
+            <button className="row-btn" title="修改端口" onClick={() => setPortOpen(true)}>
+              <IconPencil size={16} />
+            </button>
+          </div>
+          {info.portWarning && <div className="port-warning">{info.portWarning}</div>}
+          <div className="card-title-row" style={{ marginTop: 18 }}>
             <span>令牌</span>
           </div>
           <div className="token-row">
@@ -302,7 +313,122 @@ export default function Agent() {
           </div>
         </div>
       </div>
+
+      <PortModal
+        open={portOpen}
+        current={info.port}
+        onClose={() => setPortOpen(false)}
+        onSaved={(next) => {
+          setInfo(next);
+          setPortOpen(false);
+          showToast(`端口已改为 ${next.port}，把新的接入指令发给用 HTTP 方式接入的智能体`, "success");
+        }}
+      />
     </div>
+  );
+}
+
+/** 改端口分两步：先填端口，再看清影响后确认——已配置的智能体会因此断开，防误触。 */
+function PortModal({
+  open,
+  current,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  current: number;
+  onClose: () => void;
+  onSaved: (info: AgentInfo) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [step, setStep] = useState<"edit" | "confirm">("edit");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setValue(String(current));
+    setStep("edit");
+    setError("");
+  }, [open, current]);
+
+  const port = Number(value);
+  const invalid = !/^\d+$/.test(value.trim()) || port < 1024 || port > 65535;
+  const unchanged = port === current;
+
+  const next = () => {
+    if (invalid) return setError("端口需在 1024–65535 之间");
+    if (unchanged) return onClose();
+    setError("");
+    setStep("confirm");
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      onSaved(await api.agentSetPort(port));
+    } catch (e) {
+      setError(errText(e));
+      setStep("edit");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} title={step === "edit" ? "修改端口" : "确认修改端口？"} onClose={() => !saving && onClose()}>
+      {step === "edit" ? (
+        <>
+          <input
+            autoFocus
+            inputMode="numeric"
+            className="mono"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value.replace(/[^\d]/g, "").slice(0, 5));
+              setError("");
+            }}
+            onKeyDown={(e) => e.key === "Enter" && next()}
+            style={{ width: "100%" }}
+          />
+          {error && <div className="port-warning">{error}</div>}
+          <div className="modal-actions">
+            <button className="btn" onClick={onClose}>
+              取消
+            </button>
+            <button className="btn primary" onClick={next} disabled={!value}>
+              下一步
+            </button>
+          </div>
+        </>
+      ) : (
+        <div key="confirm" className="tab-panel" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="port-change mono">
+            <span className="dim">{current}</span>
+            <span className="dim">→</span>
+            <span>{port}</span>
+          </div>
+          <div className="port-impact">
+            <div>
+              <span className="dot bad" />
+              按 HTTP / MCP(HTTP) 方式接入的智能体会立即断开，需重新发送接入指令
+            </div>
+            <div>
+              <span className="dot ok" />
+              MCP(stdio) 与命令行方式自动跟随，无需改动
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setStep("edit")} disabled={saving}>
+              返回
+            </button>
+            <button className="btn primary" onClick={save} disabled={saving}>
+              {saving ? "正在切换…" : "确认修改"}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

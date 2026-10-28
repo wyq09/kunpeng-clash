@@ -1701,7 +1701,7 @@ input:focus {
 }
 
 .page-anim {
-  animation: page-in 320ms var(--ease-out) both;
+  animation: page-in 320ms var(--ease-out) backwards;
 }
 
 /* 卡片依次浮现（只在挂载时发生一次） */
@@ -1709,7 +1709,7 @@ input:focus {
 .page-anim .settings-group,
 .page-anim .profile-card,
 .page-anim .proxy-group-item {
-  animation: rise-in 420ms var(--ease-out) both;
+  animation: rise-in 420ms var(--ease-out) backwards;
 }
 
 .page-anim :is(.card, .settings-group, .profile-card, .proxy-group-item):nth-child(2) {
@@ -2359,4 +2359,45 @@ div.fade-swap {
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }
+}
+
+.port-warning {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--yellow);
+  margin: -4px 0 4px;
+}
+
+.port-change {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+  font-size: 28px;
+  font-weight: 600;
+  padding: 10px 0 4px;
+}
+
+.port-impact {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--card-inner);
+  border-radius: 12px;
+}
+
+.port-impact > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.port-impact .dot {
+  width: 7px;
+  height: 7px;
+  transform: translateY(-1px);
 }

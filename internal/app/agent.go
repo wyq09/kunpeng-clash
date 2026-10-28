@@ -62,8 +62,12 @@ type AgentInfo struct {
 	CLIExample    string      `json:"cliExample"`    // 命令行示例
 	HTTPExample   string      `json:"httpExample"`   // curl 示例
 	Tools         []AgentTool `json:"tools"`
-	Activity      []AgentCall `json:"activity"` // 最近调用，新的在前
-	Error         string      `json:"error"`    // 网关启动失败原因
+	Activity      []AgentCall `json:"activity"`      // 最近调用，新的在前
+	Error         string      `json:"error"`         // 网关启动失败原因
+	Port          int         `json:"port"`          // 实际监听端口（未运行时为将要使用的端口）
+	PreferredPort int         `json:"preferredPort"` // 设定端口（自定义或默认 9096）
+	PortCustom    bool        `json:"portCustom"`    // 是否为用户自定义端口
+	PortWarning   string      `json:"portWarning"`   // 设定端口被占用、临时改用其他端口时的提示
 }
 
 type agentRuntime struct {
@@ -97,16 +101,7 @@ func (a *App) startAgentLocked() bool {
 		ports = append([]int{p}, agentPorts...)
 	}
 	a.mu.Unlock()
-	srv, err := agentapi.Start(agentapi.Config{
-		Registry: a.agent.reg,
-		Name:     "鲲鹏 Clash",
-		Version:  AppVersion,
-		Token:    a.agentToken,
-		Guide:    a.agentGuide,
-		Skill:    a.agentSkill,
-		Brief:    a.agentBrief,
-		OnCall:   a.recordAgentCall,
-	}, ports)
+	srv, err := agentapi.Start(a.agentConfig(a.agent.reg), ports)
 	if err != nil {
 		a.agent.err = err.Error()
 		log.Printf("[kunpeng][agent] %v", err)
@@ -116,14 +111,29 @@ func (a *App) startAgentLocked() bool {
 	a.agent.err = ""
 	port := portOf(srv.Addr())
 	a.mu.Lock()
-	changed := a.state.AgentPort != port
-	a.state.AgentPort = port
+	changed := a.state.AgentPort != port && !a.state.AgentPortFixed
+	if changed {
+		a.state.AgentPort = port
+	}
 	a.mu.Unlock()
 	if changed {
 		_ = a.saveState()
 	}
 	log.Printf("[kunpeng][agent] 智能体网关已启动: http://%s", srv.Addr())
 	return true
+}
+
+func (a *App) agentConfig(reg *agentapi.Registry) agentapi.Config {
+	return agentapi.Config{
+		Registry: reg,
+		Name:     "鲲鹏 Clash",
+		Version:  AppVersion,
+		Token:    a.agentToken,
+		Guide:    a.agentGuide,
+		Skill:    a.agentSkill,
+		Brief:    a.agentBrief,
+		OnCall:   a.recordAgentCall,
+	}
 }
 
 func (a *App) stopAgent() {
@@ -226,6 +236,16 @@ func (a *App) AgentInfoNow() AgentInfo {
 		Enabled: enabled, Running: running, BaseURL: base, MCPURL: base + "/mcp", Token: token,
 		CLIPath: bin, Error: errMsg, Activity: activity,
 	}
+	info.Port = portOf(strings.TrimPrefix(base, "http://"))
+	a.mu.Lock()
+	info.PreferredPort, info.PortCustom = a.state.AgentPort, a.state.AgentPortFixed
+	a.mu.Unlock()
+	if info.PreferredPort == 0 {
+		info.PreferredPort = agentPorts[0]
+	}
+	if running && info.PortCustom && info.Port != info.PreferredPort {
+		info.PortWarning = fmt.Sprintf("端口 %d 被其他程序占用，已临时改用 %d；用 HTTP 方式接入的智能体需要改地址，或换一个空闲端口", info.PreferredPort, info.Port)
+	}
 	info.MCPConfig = a.mcpStdioConfig()
 	info.MCPHTTPConfig = mustJSON(map[string]any{
 		"mcpServers": map[string]any{
@@ -284,6 +304,52 @@ func (a *App) AgentResetToken() (AgentInfo, error) {
 	a.agent.mu.Unlock()
 	if running {
 		a.writeAgentEndpoint()
+	}
+	return a.AgentInfoNow(), nil
+}
+
+// AgentSetPort 自定义网关端口：运行中则先在新端口起好服务再关旧的，失败时保持原状。
+func (a *App) AgentSetPort(port int) (AgentInfo, error) {
+	if port < 1024 || port > 65535 {
+		return AgentInfo{}, fmt.Errorf("端口需在 1024–65535 之间")
+	}
+	if port == a.MixedPort() {
+		return AgentInfo{}, fmt.Errorf("端口 %d 是代理端口，换一个", port)
+	}
+	a.agent.mu.Lock()
+	old := a.agent.srv
+	reg := a.agent.reg
+	a.agent.mu.Unlock()
+	if old != nil && portOf(old.Addr()) == port {
+		a.mu.Lock()
+		a.state.AgentPort, a.state.AgentPortFixed = port, true
+		a.mu.Unlock()
+		return a.AgentInfoNow(), a.saveState()
+	}
+	if old == nil {
+		if err := portAvailable(port, 0); err != nil {
+			return AgentInfo{}, err
+		}
+	} else {
+		srv, err := agentapi.Start(a.agentConfig(reg), []int{port})
+		if err != nil {
+			return AgentInfo{}, fmt.Errorf("端口 %d 已被其他程序占用，换一个（如 %d）", port, port+1)
+		}
+		a.agent.mu.Lock()
+		a.agent.srv = srv
+		a.agent.err = ""
+		a.agent.mu.Unlock()
+		old.Close()
+	}
+	a.mu.Lock()
+	a.state.AgentPort, a.state.AgentPortFixed = port, true
+	a.mu.Unlock()
+	if err := a.saveState(); err != nil {
+		return AgentInfo{}, err
+	}
+	if old != nil {
+		a.writeAgentEndpoint()
+		log.Printf("[kunpeng][agent] 网关端口已改为 %d", port)
 	}
 	return a.AgentInfoNow(), nil
 }
